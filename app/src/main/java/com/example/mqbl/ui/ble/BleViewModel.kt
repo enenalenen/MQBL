@@ -23,6 +23,7 @@ import kotlinx.coroutines.channels.BufferOverflow // SharedFlow 설정용
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import com.example.mqbl.common.CommunicationHub
 
 
 // 상수 정의
@@ -77,6 +78,7 @@ class BleViewModel(application: Application) : AndroidViewModel(application) {
                 // TODO: UI에 블루투스 활성화 요청 트리거 상태/이벤트 전달 고려
             }
         }
+        listenForMqttMessages()
     }
 
     // --- 공개 함수 (UI에서 호출) ---
@@ -310,22 +312,66 @@ class BleViewModel(application: Application) : AndroidViewModel(application) {
         connectedThread = null
     }
 
-    /** 수신된 메시지 처리 및 로그 업데이트 */
-    private fun processReceivedMessage(message: String) {
-        updateDataLog("<- $message") // 전체 로그에 추가
+    // --- MQTT -> BLE 메시지 처리 로직 ---
+    /** CommunicationHub를 통해 MQTT로부터 오는 메시지를 구독하고 BLE로 전송 */
+    private fun listenForMqttMessages() {
+        viewModelScope.launch {
+            CommunicationHub.mqttToBleFlow.collect { message ->
+                Log.i(TAG, "Message received from Hub (MQTT->BLE): $message")
 
+                // --- MQTT로 수신된 메시지 내용 확인 및 감지 이벤트 로그 추가 ---
+                val trimmedMessage = message.trim()
+                var eventDescription: String? = null
+                when (trimmedMessage.lowercase()) { // 소문자로 변환하여 비교
+                    "siren" -> eventDescription = "사이렌 감지됨 (MQTT)" // 출처 표시 (선택 사항)
+                    "horn" -> eventDescription = "경적 감지됨 (MQTT)"
+                    "boom" -> eventDescription = "폭발음 감지됨 (MQTT)"
+                }
+                // 감지된 이벤트가 있다면 로그에 추가 (BLE 화면에 표시됨)
+                if (eventDescription != null) {
+                    addDetectionEvent(eventDescription)
+                }
+                // --- 감지 이벤트 처리 끝 ---
+
+                // --- 수신된 원본 메시지를 연결된 BLE 기기로 전송 (기존 로직) ---
+                if (connectedThread != null && _uiState.value.connectedDeviceName != null) {
+                    Log.d(TAG, "Forwarding original message to connected BLE device.")
+                    connectedThread?.write(message.toByteArray())
+                    // 필요시 개행 문자 등 추가 전송
+                    // connectedThread?.write("\n".toByteArray())
+                } else {
+                    Log.w(TAG, "BLE device not connected. Cannot forward message from MQTT.")
+                    // 필요시 사용자 피드백
+                }
+                // --- BLE 기기로 전송 끝 ---
+            }
+        }
+    } // listenForMqttMessages 끝
+
+    // --- BLE -> MQTT 메시지 처리 로직 ---
+    /** BLE 기기로부터 수신된 메시지 처리 */
+    private fun processReceivedMessage(message: String) {
+        updateDataLog("<- $message") // 로컬 로그 업데이트
+
+        // --- 수신된 메시지를 CommunicationHub를 통해 MQTT Flow로 전달 ---
+        viewModelScope.launch {
+            Log.i(TAG, "Forwarding message to Hub (BLE->MQTT): $message")
+            CommunicationHub.emitBleToMqtt(message)
+        }
+        // ---------------------------------------------------------
+
+        // --- 기존 로컬 처리 로직 (사이렌 등 감지) ---
         val trimmedMessage = message.trim()
         var eventDescription: String? = null
-        when (trimmedMessage.lowercase()) { // 소문자로 변환하여 비교
+        when (trimmedMessage.lowercase()) {
             "siren" -> eventDescription = "사이렌 감지됨"
             "horn" -> eventDescription = "경적 감지됨"
             "boom" -> eventDescription = "폭발음 감지됨"
         }
-
-        // 특정 이벤트 감지 시 로그 추가
         if (eventDescription != null) {
             addDetectionEvent(eventDescription)
         }
+        // --- 기존 로컬 처리 로직 끝 ---
     }
 
     /** 데이터 로그 StateFlow 업데이트 (송/수신 데이터 추가) */
@@ -505,5 +551,6 @@ class BleViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     } // ConnectedThread 끝
+
 
 } // BleViewModel 끝

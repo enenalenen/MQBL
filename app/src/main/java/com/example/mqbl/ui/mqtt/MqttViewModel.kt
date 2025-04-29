@@ -13,6 +13,7 @@ import org.eclipse.paho.client.mqttv3.*
 import java.text.SimpleDateFormat
 import java.util.*
 import javax.net.ssl.SSLSocketFactory // SSL 소켓 팩토리 사용
+import com.example.mqbl.common.CommunicationHub
 
 const val MQTT_SUBSCRIBE_TOPIC = "test/mqbl/status" // 자동 구독할 토픽
 const val MQTT_PUBLISH_TOPIC = "test/mqbl/command" // 고정 발행 토픽
@@ -58,6 +59,7 @@ class MqttViewModel(application: Application) : AndroidViewModel(application) {
     // --- ViewModel 초기화 ---
     init {
         initializeMqttClient()
+        listenForBleMessages()
     }
 
     // --- 공개 함수 (UI에서 호출) ---
@@ -242,6 +244,25 @@ class MqttViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- 내부 로직 함수 ---
 
+    // --- BLE -> MQTT 메시지 처리 로직 ---
+    /** CommunicationHub를 통해 BLE로부터 오는 메시지를 구독하고 MQTT로 발행 */
+    private fun listenForBleMessages() {
+        viewModelScope.launch {
+            CommunicationHub.bleToMqttFlow.collect { message ->
+                Log.i(TAG, "Message received from Hub (BLE->MQTT): $message")
+                // 현재 MQTT 브로커에 연결되어 있는지 확인
+                if (uiState.value.isConnected) {
+                    Log.d(TAG, "Publishing message from BLE to MQTT topic $MQTT_PUBLISH_TOPIC")
+                    // 수신된 메시지를 고정된 발행 토픽으로 발행
+                    publish(payload = message) // 수정된 publish 함수 사용
+                } else {
+                    Log.w(TAG, "MQTT not connected. Cannot publish message from BLE.")
+                    // TODO: 사용자에게 메시지 발행 실패 피드백 고려 또는 메시지 큐잉
+                }
+            }
+        }
+    }
+
     /** MQTT 클라이언트 초기화 및 콜백 설정 */
     private fun initializeMqttClient() {
         val context = getApplication<Application>().applicationContext
@@ -287,12 +308,22 @@ class MqttViewModel(application: Application) : AndroidViewModel(application) {
                     val newItem = MqttMessageItem(topic = topic, payload = msgPayload)
                     Log.d(TAG, "MQTT Message Arrived: ${newItem.payload} on topic ${newItem.topic}")
 
-                    // 메시지 로그 업데이트
+                    // 로컬 메시지 로그 업데이트 (기존 로직)
                     viewModelScope.launch {
                         val currentList = _receivedMessages.value
-                        val updatedList = (listOf(newItem) + currentList).take(MAX_MQTT_LOG_SIZE) // 새 메시지를 맨 앞에 추가하고 크기 제한
+                        val updatedList = (listOf(newItem) + currentList).take(MAX_MQTT_LOG_SIZE)
                         _receivedMessages.value = updatedList
                     }
+
+                    // --- 구독 토픽으로 온 메시지인지 확인하고 BLE Flow로 전달 ---
+                    if (topic == MQTT_SUBSCRIBE_TOPIC) {
+                        viewModelScope.launch {
+                            Log.i(TAG, "Forwarding message to Hub (MQTT->BLE): $msgPayload")
+                            // 수신된 메시지 페이로드를 그대로 Hub로 전달
+                            CommunicationHub.emitMqttToBle(msgPayload)
+                        }
+                    }
+                    // ---------------------------------------------------
                 }
             }
 
@@ -330,4 +361,5 @@ class MqttViewModel(application: Application) : AndroidViewModel(application) {
             Log.e(TAG, "Error during MQTT client cleanup in onCleared", e)
         }
     }
+
 } // MqttViewModel 끝
