@@ -33,12 +33,9 @@ fun MqttScreen(
     // State Hoisting: ViewModel로 전달할 사용자 액션 콜백 함수들
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
-    onSubscribe: (topic: String) -> Unit,
-    onPublish: (topic: String, payload: String) -> Unit
+    onPublish: (payload: String) -> Unit
 ) {
     // --- UI 내부에서 사용하는 상태 (TextField 입력 값 등) ---
-    var subscribeTopic by remember { mutableStateOf("test/mqbl/status") } // 구독 토픽 기본값
-    var publishTopic by remember { mutableStateOf("test/mqbl/command") }   // 발행 토픽 기본값
     var publishMessage by remember { mutableStateOf("Hello MQBL!") } // 발행 메시지 기본값
     val listState = rememberLazyListState() // 메시지 목록 스크롤 상태
 
@@ -82,49 +79,28 @@ fun MqttScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // 구독 영역
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = subscribeTopic,
-                onValueChange = { subscribeTopic = it },
-                label = { Text("구독 토픽") }, // 한글 라벨 예시
-                modifier = Modifier.weight(1f), // 남은 너비 채우기
-                singleLine = true,
-                enabled = uiState.isConnected // 연결 상태일 때만 활성화
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Button(onClick = { onSubscribe(subscribeTopic) }, enabled = uiState.isConnected) {
-                Text("구독") // 한글 버튼 텍스트 예시
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
         // 발행 영역
-        OutlinedTextField(
-            value = publishTopic,
-            onValueChange = { publishTopic = it },
-            label = { Text("발행 토픽") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            enabled = uiState.isConnected // 연결 상태일 때만 활성화
-        )
+        // 고정된 발행 토픽 표시 (선택 사항)
+        Text("메시지 발행 (Topic: $MQTT_PUBLISH_TOPIC)", style = MaterialTheme.typography.titleSmall)
         Spacer(modifier = Modifier.height(8.dp))
-        OutlinedTextField(
+        // 발행 토픽 입력 필드 제거됨
+        OutlinedTextField( // 메시지 입력 필드는 유지
             value = publishMessage,
             onValueChange = { publishMessage = it },
             label = { Text("발행 메시지") },
             modifier = Modifier.fillMaxWidth(),
-            enabled = uiState.isConnected // 연결 상태일 때만 활성화
+            enabled = uiState.isConnected
         )
         Spacer(modifier = Modifier.height(8.dp))
         Button(
-            onClick = { onPublish(publishTopic, publishMessage) },
+            // 수정된 onPublish 콜백 호출 (payload만 전달)
+            onClick = { onPublish(publishMessage) },
             enabled = uiState.isConnected,
-            modifier = Modifier.align(Alignment.End) // 버튼 오른쪽 정렬
+            modifier = Modifier.align(Alignment.End)
         ) {
             Text("발행")
         }
+        // --- 발행 영역 수정 끝 ---
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -202,8 +178,7 @@ fun MqttScreenPreview() {
             receivedMessages = previewMessages,
             onConnect = {},
             onDisconnect = {},
-            onSubscribe = {},
-            onPublish = { _, _ -> } // 파라미터 2개 받는 람다
+            onPublish = { /* payload -> */ } // 수정된 시그니처 반영
         )
     }
 }

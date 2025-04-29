@@ -166,7 +166,6 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
                 )
             }
             composable(Screen.Mqtt.route) {
-                // ... (MQTT 화면 설정은 동일) ...
                 val mqttViewModel: MqttViewModel = viewModel()
                 val uiState by mqttViewModel.uiState.collectAsStateWithLifecycle()
                 val receivedMessages by mqttViewModel.receivedMessages.collectAsStateWithLifecycle()
@@ -176,7 +175,6 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
                     receivedMessages = receivedMessages,
                     onConnect = mqttViewModel::connect,
                     onDisconnect = mqttViewModel::disconnect,
-                    onSubscribe = mqttViewModel::subscribe,
                     onPublish = mqttViewModel::publish
                 )
             }

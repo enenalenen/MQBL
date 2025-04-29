@@ -14,6 +14,9 @@ import java.text.SimpleDateFormat
 import java.util.*
 import javax.net.ssl.SSLSocketFactory // SSL 소켓 팩토리 사용
 
+const val MQTT_SUBSCRIBE_TOPIC = "test/mqbl/status" // 자동 구독할 토픽
+const val MQTT_PUBLISH_TOPIC = "test/mqbl/command" // 고정 발행 토픽
+
 // 상수 정의
 private const val TAG = "MqttViewModel"
 private const val MAX_MQTT_LOG_SIZE = 50 // MQTT 로그 최대 크기
@@ -168,34 +171,28 @@ class MqttViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** 지정된 토픽 구독 */
-    fun subscribe(topic: String) {
+    // --- subscribe 함수는 내부용으로 변경 (private) ---
+    private fun subscribe(topic: String) {
         if (topic.isBlank()) {
-            showToast("구독할 토픽을 입력하세요.")
+            Log.w(TAG,"Subscribe attempt with blank topic.")
             return
         }
         if (!uiState.value.isConnected) {
-            showToast("먼저 브로커에 연결하세요.")
+            Log.w(TAG,"Subscribe attempt while not connected.")
+            // 연결 완료 콜백에서 호출되므로 이 경우는 거의 없지만 방어 코드
             return
         }
-        if (!::mqttClient.isInitialized || !mqttClient.isConnected) {
-            Log.w(TAG, "Client not ready for subscribe.")
-            return
-        }
-
         try {
-            val qos = 1 // 구독 QoS 레벨
+            val qos = 1
             mqttClient.subscribe(topic, qos, null, object : IMqttActionListener {
                 override fun onSuccess(asyncActionToken: IMqttToken?) {
-                    Log.d(TAG, "Subscribed to topic: $topic")
-                    showToast("$topic 구독 성공")
-                    // TODO: 구독한 토픽 목록 상태 관리 추가 고려
+                    Log.i(TAG, "Successfully subscribed to topic: $topic")
+                    showToast("$topic 구독 성공") // 구독 성공 피드백
                 }
-
                 override fun onFailure(asyncActionToken: IMqttToken?, exception: Throwable?) {
                     val errorMsg = exception?.message ?: "알 수 없는 오류"
                     Log.e(TAG, "Failed to subscribe to topic $topic: $errorMsg")
-                    showToast("구독 실패: $errorMsg")
+                    showToast("$topic 구독 실패: $errorMsg")
                 }
             })
         } catch (e: MqttException) {
@@ -203,11 +200,13 @@ class MqttViewModel(application: Application) : AndroidViewModel(application) {
             showToast("구독 예외: ${e.message}")
         }
     }
+    // --- subscribe 함수 끝 ---
 
     /** 지정된 토픽으로 메시지 발행 */
-    fun publish(topic: String, payload: String) {
-        if (topic.isBlank() || payload.isBlank()) {
-            showToast("발행할 토픽과 메시지를 입력하세요.")
+    fun publish(payload: String) {
+        val topic = MQTT_PUBLISH_TOPIC // 고정된 발행 토픽 사용
+        if (payload.isBlank()) {
+            showToast("발행할 메시지를 입력하세요.")
             return
         }
         if (!uiState.value.isConnected) {
@@ -221,15 +220,13 @@ class MqttViewModel(application: Application) : AndroidViewModel(application) {
 
         try {
             val message = MqttMessage(payload.toByteArray()).apply {
-                this.qos = 1 // 발행 QoS 레벨
-                this.isRetained = false // Retain 메시지 아님
+                this.qos = 1
+                this.isRetained = false
             }
             mqttClient.publish(topic, message, null, object : IMqttActionListener {
                 override fun onSuccess(asyncActionToken: IMqttToken?) {
                     Log.d(TAG, "Message publish action success to topic $topic")
-                    // 실제 전송 완료는 deliveryComplete 에서 확인 가능
                 }
-
                 override fun onFailure(asyncActionToken: IMqttToken?, exception: Throwable?) {
                     val errorMsg = exception?.message ?: "알 수 없는 오류"
                     Log.e(TAG, "Failed to publish message: $errorMsg")
@@ -241,6 +238,7 @@ class MqttViewModel(application: Application) : AndroidViewModel(application) {
             showToast("발행 예외: ${e.message}")
         }
     }
+    // --- publish 함수 수정 끝 ---
 
     // --- 내부 로직 함수 ---
 
@@ -263,8 +261,8 @@ class MqttViewModel(application: Application) : AndroidViewModel(application) {
                         connectionStatus = "상태: 연결됨 (${serverURI})",
                         errorMessage = null
                     )}
-                    // TODO: 연결 성공 시 자동으로 구독할 토픽이 있다면 여기서 구독 실행
-                    // subscribe("default/topic")
+                    Log.i(TAG, "Auto-subscribing to $MQTT_SUBSCRIBE_TOPIC")
+                    subscribe(MQTT_SUBSCRIBE_TOPIC) // 정의된 상수로 구독
                 }
             }
 
