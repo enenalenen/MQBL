@@ -20,7 +20,7 @@ import androidx.compose.runtime.LaunchedEffect // SharedFlow 구독용
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalLifecycleOwner // <--- LocalLifecycleOwner 사용 위해 필수
+import androidx.lifecycle.compose.LocalLifecycleOwner // <--- LocalLifecycleOwner 사용 위해 필수
 import androidx.compose.ui.tooling.preview.Preview
 // --- Lifecycle & ViewModel ---
 import androidx.lifecycle.Lifecycle // Lifecycle 이벤트 사용
@@ -40,7 +40,9 @@ import com.example.mqbl.ui.ble.BleScreen
 import com.example.mqbl.ui.ble.BleViewModel
 import com.example.mqbl.ui.mqtt.MqttScreen
 import com.example.mqbl.ui.mqtt.MqttViewModel
+import com.example.mqbl.service.CommunicationService
 // import com.example.mqbl.ui.theme.MQBLTheme // 필요시 테마 import
+import android.content.Intent
 
 class MainActivity : ComponentActivity() {
 
@@ -56,6 +58,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        startCommunicationService()
+
         setContent {
             MaterialTheme { // TODO: MQBLTheme 적용
                 MainAppNavigation(
@@ -67,6 +72,18 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    private fun startCommunicationService() {
+        val serviceIntent = Intent(this, CommunicationService::class.java)
+        // API 26 이상에서는 startForegroundService 사용
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
+        }
+        Log.i("MainActivity", "CommunicationService started.")
+    }
+
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

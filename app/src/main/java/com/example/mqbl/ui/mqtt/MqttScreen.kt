@@ -20,6 +20,10 @@ import androidx.compose.ui.unit.sp
 // import com.example.mqbl.ui.mqtt.MqttUiState
 // import com.example.mqbl.ui.mqtt.MqttMessageItem
 
+// --- 화면 표시용 상수 정의 (CommunicationService에서 사용하는 값과 일치해야 함) ---
+private const val MQTT_PUBLISH_TOPIC = "test/mqbl/command"
+// --------------------------------------------------------------------------
+
 /**
  * MQTT 기능을 위한 메인 화면 Composable.
  * ViewModel로부터 상태를 전달받고, 사용자 액션을 ViewModel로 전달합니다.
@@ -81,7 +85,7 @@ fun MqttScreen(
 
         // 발행 영역
         // 고정된 발행 토픽 표시 (선택 사항)
-        Text("메시지 발행 (Topic: $MQTT_PUBLISH_TOPIC)", style = MaterialTheme.typography.titleSmall)
+        Text("메시지 발행 (Topic: $MQTT_PUBLISH_TOPIC)", style = MaterialTheme.typography.titleSmall) // 수정된 부분: 여기서 MQTT_PUBLISH_TOPIC 사용
         Spacer(modifier = Modifier.height(8.dp))
         // 발행 토픽 입력 필드 제거됨
         OutlinedTextField( // 메시지 입력 필드는 유지

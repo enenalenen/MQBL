@@ -9,19 +9,21 @@ junit = "4.13.2"
 junitVersion = "1.2.1"
 espressoCore = "3.6.1"
 lifecycleRuntimeKtx = "2.8.7"
+lifecycleService = "2.8.7"
 activityCompose = "1.10.1"
-composeBom = "2024.04.01"
+composeBom = "2025.04.01"
 # Keep composeCompiler version from MQTTTest (compatible with Kotlin 2.0.0)
 composeCompiler = "2.0.0"
 # Add Navigation Compose version (use a recent stable version)
-navigationCompose = "2.7.7"
+navigationCompose = "2.8.9"
 # Add Paho MQTT version
 pahoMqtt = "4.3"
 # Add versions for libraries explicitly mentioned in BLEv2 gradle
-appcompat = "1.6.1"
-activityKtx = "1.9.0"
+appcompat = "1.7.0"
+activityKtx = "1.10.1"
 
 [libraries]
+androidx-lifecycle-service = { group = "androidx.lifecycle", name = "lifecycle-service", version.ref = "lifecycleService" }
 androidx-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
 # AndroidX Core
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
