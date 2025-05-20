@@ -91,8 +91,10 @@ class CommunicationService : LifecycleService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        super.onStartCommand(intent, flags, startId) // <--- 이 줄을 추가합니다.
         Log.i(TAG_SERVICE, "Service onStartCommand Received")
         startForeground(NOTIFICATION_ID, createNotification("서비스 실행 중..."))
+        // TODO: Intent Action 처리
         return START_STICKY
     }
 
