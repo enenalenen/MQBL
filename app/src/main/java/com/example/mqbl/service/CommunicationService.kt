@@ -1,6 +1,5 @@
 package com.example.mqbl.service
 
-// --- Android 및 BLE 관련 import ---
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.*
@@ -14,43 +13,40 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.LifecycleService // LifecycleService는 한 번만 import
+import androidx.lifecycle.LifecycleService // 단일 import
 import androidx.lifecycle.lifecycleScope
 import com.example.mqbl.MainActivity
 import com.example.mqbl.R
 import com.example.mqbl.common.CommunicationHub
 import com.example.mqbl.ui.ble.BleUiState
 import com.example.mqbl.ui.ble.DetectionEvent
+import com.example.mqbl.ui.tcp.TcpUiState // 정확한 경로로 단일 import
+import com.example.mqbl.ui.tcp.TcpMessageItem // 정확한 경로로 단일 import
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import java.io.BufferedReader
 import java.io.IOException
 import java.io.InputStream
+import java.io.InputStreamReader
 import java.io.OutputStream
+import java.io.PrintWriter
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.text.SimpleDateFormat
 import java.util.*
-// --- MQTT 관련 import ---
-import com.example.mqbl.ui.mqtt.MqttMessageItem // MqttMessageItem은 한 번만 import
-import com.example.mqbl.ui.mqtt.MqttUiState // MqttUiState는 한 번만 import
-import kotlinx.coroutines.flow.StateFlow
-import info.mqtt.android.service.MqttAndroidClient
-import org.eclipse.paho.client.mqttv3.*
-import javax.net.ssl.SSLSocketFactory
 
 // --- 상수 정의 ---
 private const val TAG_SERVICE = "CommService"
 private const val TAG_BLE = "CommService_BLE"
-private const val TAG_MQTT = "CommService_MQTT"
+private const val TAG_TCP = "CommService_TCP"
 private val BT_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
 private const val MAX_DETECTION_LOG_SIZE = 10
-private const val MQTT_SERVER_URI = "ssl://980ce8dfb90a4c1f923f97df872e7302.s1.eu.hivemq.cloud:8883"
-private const val MQTT_USERNAME = "poiu0987"
-private const val MQTT_PASSWORD = "Qwer1234"
-private const val MQTT_CLIENT_ID_PREFIX = "mqbl_service_"
-private const val MQTT_SUBSCRIBE_TOPIC = "test/mqbl/status"
-private const val MQTT_PUBLISH_TOPIC = "test/mqbl/command"
-private const val MAX_MQTT_LOG_SIZE = 50
+private const val DEFAULT_TCP_SERVER_IP = "192.168.0.18"
+private const val DEFAULT_TCP_SERVER_PORT = 12345
+private const val MAX_TCP_LOG_SIZE = 50
 private const val NOTIFICATION_CHANNEL_ID = "MQBL_Communication_Channel"
 private const val NOTIFICATION_ID = 1
+// -----------------
 
 class CommunicationService : LifecycleService() {
 
@@ -59,51 +55,52 @@ class CommunicationService : LifecycleService() {
         fun getBleUiStateFlow(): StateFlow<BleUiState> = _bleUiState.asStateFlow()
         fun getBondedDevicesFlow(): StateFlow<List<BluetoothDevice>> = _bondedDevices.asStateFlow()
         fun getDetectionLogFlow(): StateFlow<List<DetectionEvent>> = _detectionEventLog.asStateFlow()
-        fun getMqttUiStateFlow(): StateFlow<MqttUiState> = _mqttUiState.asStateFlow()
-        fun getReceivedMqttMessagesFlow(): StateFlow<List<MqttMessageItem>> = _receivedMqttMessages.asStateFlow()
+        fun getTcpUiStateFlow(): StateFlow<TcpUiState> = _tcpUiState.asStateFlow()
+        fun getReceivedTcpMessagesFlow(): StateFlow<List<TcpMessageItem>> = _receivedTcpMessages.asStateFlow()
     }
     private val binder = LocalBinder()
 
     private lateinit var bluetoothManager: BluetoothManager
     private var bluetoothAdapter: BluetoothAdapter? = null
-    private var connectThread: ConnectThread? = null // BLE 연결 스레드
-    private var connectedThread: ConnectedThread? = null // BLE 통신 스레드
+    private var connectThread: ConnectThread? = null
+    private var connectedThread: ConnectedThread? = null
     private val timeFormatter = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
     private val _bleUiState = MutableStateFlow(BleUiState())
     private val _bondedDevices = MutableStateFlow<List<BluetoothDevice>>(emptyList())
     private val _detectionEventLog = MutableStateFlow<List<DetectionEvent>>(emptyList())
 
-    private lateinit var mqttClient: MqttAndroidClient
-    private var mqttClientId: String = ""
+    private var tcpSocket: Socket? = null
+    private var tcpPrintWriter: PrintWriter? = null
+    private var tcpBufferedReader: BufferedReader? = null
+    private var tcpReceiveJob: Job? = null
+    private var currentServerIp: String = DEFAULT_TCP_SERVER_IP
+    private var currentServerPort: Int = DEFAULT_TCP_SERVER_PORT
 
-    private val _mqttUiState = MutableStateFlow(MqttUiState())
-    private val _receivedMqttMessages = MutableStateFlow<List<MqttMessageItem>>(emptyList())
+    private val _tcpUiState = MutableStateFlow(TcpUiState(connectionStatus = "TCP/IP: 연결 끊김"))
+    private val _receivedTcpMessages = MutableStateFlow<List<TcpMessageItem>>(emptyList())
 
     override fun onCreate() {
         super.onCreate()
         Log.i(TAG_SERVICE, "Service onCreate")
         createNotificationChannel()
         initializeBle()
-        initializeMqtt()
-        listenForMqttMessages()
-        listenForBleMessages()
+        listenForTcpToBleMessages()
+        listenForBleToTcpMessages()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        super.onStartCommand(intent, flags, startId) // <--- 이 줄을 추가합니다.
+        super.onStartCommand(intent, flags, startId)
         Log.i(TAG_SERVICE, "Service onStartCommand Received")
         startForeground(NOTIFICATION_ID, createNotification("서비스 실행 중..."))
-        // TODO: Intent Action 처리
         return START_STICKY
     }
 
     override fun onBind(intent: Intent): IBinder {
-        super.onBind(intent) // LifecycleService 사용 시 호출 권장
+        super.onBind(intent)
         Log.i(TAG_SERVICE, "Service onBind")
-        return binder // binder 객체 반환
+        return binder
     }
-
     override fun onUnbind(intent: Intent?): Boolean {
         Log.i(TAG_SERVICE, "Service onUnbind")
         return true
@@ -112,12 +109,11 @@ class CommunicationService : LifecycleService() {
     override fun onDestroy() {
         Log.w(TAG_SERVICE, "Service onDestroy")
         disconnectBle()
-        disconnectMqttInternal(userRequested = false)
-        stopForeground(STOP_FOREGROUND_REMOVE) // API 레벨에 따라 stopForeground(true) 또는 removeNotification()
+        disconnectTcpInternal(userRequested = false)
+        stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
     }
 
-    // --- 공개 함수 (Binder를 통해 ViewModel에서 호출) ---
     fun requestBleConnect(device: BluetoothDevice) { connectToDevice(device) }
     fun requestBleDisconnect() { disconnectBle() }
     fun sendBleValue(value: Int) { sendValueInternal(value) }
@@ -127,12 +123,24 @@ class CommunicationService : LifecycleService() {
             _bleUiState.update { it.copy(status = "상태: 블루투스 비활성화됨") }
         }
     }
-    fun requestMqttConnect() { connectMqtt() }
-    fun requestMqttDisconnect() { disconnectMqttInternal(userRequested = true) }
-    fun requestMqttSubscribe(topic: String) { subscribeMqtt(topic) }
-    fun requestMqttPublish(payload: String) { publishMqtt(MQTT_PUBLISH_TOPIC, payload) }
 
-    // --- 내부 초기화 함수 ---
+    fun requestTcpConnect(ip: String, port: Int) {
+        Log.i(TAG_TCP, "Request TCP Connect received for $ip:$port")
+        currentServerIp = ip
+        currentServerPort = port
+        connectTcp()
+    }
+
+    fun requestTcpDisconnect() {
+        Log.i(TAG_TCP, "Request TCP Disconnect received")
+        disconnectTcpInternal(userRequested = true)
+    }
+
+    fun sendTcpMessage(message: String) {
+        Log.d(TAG_TCP, "Request TCP Send Message received: $message")
+        sendTcpData(message)
+    }
+
     private fun initializeBle() {
         Log.d(TAG_BLE, "Initializing BLE...")
         bluetoothManager = application.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
@@ -149,21 +157,6 @@ class CommunicationService : LifecycleService() {
         }
     }
 
-    private fun initializeMqtt() {
-        Log.d(TAG_MQTT, "Initializing MQTT Client...")
-        mqttClientId = MQTT_CLIENT_ID_PREFIX + System.currentTimeMillis()
-        try {
-            mqttClient = MqttAndroidClient(applicationContext, MQTT_SERVER_URI, mqttClientId)
-            mqttClient.setCallback(MqttCallbackHandler())
-            Log.i(TAG_MQTT, "MQTT Client Initialized. Client ID: $mqttClientId")
-        } catch (e: MqttException) {
-            Log.e(TAG_MQTT, "Error initializing MQTT Client", e)
-            _mqttUiState.update { it.copy(connectionStatus = "상태: MQTT 초기화 실패", errorMessage = "MQTT 클라이언트 생성 오류: ${e.message}") }
-            updateNotificationCombined()
-        }
-    }
-
-    // --- 내부 BLE 로직 함수 ---
     @SuppressLint("MissingPermission")
     private fun checkBlePermissionsAndLoadDevices() {
         if (!hasRequiredBlePermissions()) {
@@ -177,7 +170,7 @@ class CommunicationService : LifecycleService() {
         } else {
             Log.w(TAG_BLE, "Bluetooth is disabled.")
             _bleUiState.update { currentState ->
-                if (currentState.connectedDeviceName == null) {
+                if (currentState.connectedDeviceName == null && !currentState.isConnecting) {
                     currentState.copy(status = "상태: 블루투스 비활성화됨")
                 } else currentState
             }
@@ -317,8 +310,8 @@ class CommunicationService : LifecycleService() {
     private fun processBleMessage(message: String) {
         updateDataLog("<- $message (BLE)")
         lifecycleScope.launch {
-            Log.d(TAG_BLE, "Forwarding message from BLE to Hub: $message")
-            CommunicationHub.emitBleToMqtt(message)
+            Log.d(TAG_BLE, "Forwarding message from BLE to Hub for TCP: $message")
+            CommunicationHub.emitBleToTcp(message)
         }
         val trimmedMessage = message.trim()
         var eventDescription: String? = null
@@ -358,167 +351,148 @@ class CommunicationService : LifecycleService() {
         }
     }
 
-    // --- 내부 MQTT 로직 함수 ---
-    private fun connectMqtt() {
-        if (!::mqttClient.isInitialized) {
-            Log.e(TAG_MQTT, "Connect failed: MQTT Client not initialized.")
-            initializeMqtt()
-            if (!::mqttClient.isInitialized) return
-        }
-        if (_mqttUiState.value.isConnected) {
-            Log.w(TAG_MQTT, "Connect ignored: Already connected.")
+    private fun connectTcp() {
+        if (tcpSocket?.isConnected == true || _tcpUiState.value.connectionStatus.contains("연결 중")) {
+            Log.w(TAG_TCP, "TCP Connect ignored: Already connected or connecting.")
             return
         }
-        Log.i(TAG_MQTT, "Attempting to connect MQTT...")
-        val options = MqttConnectOptions().apply {
-            isAutomaticReconnect = true; isCleanSession = true
-            userName = MQTT_USERNAME; password = MQTT_PASSWORD.toCharArray()
-            try { socketFactory = SSLSocketFactory.getDefault() }
-            catch (e: Exception) {
-                Log.e(TAG_MQTT, "SSL Factory Error", e)
-                lifecycleScope.launch { _mqttUiState.update { it.copy(isConnected = false, connectionStatus = "상태: SSL 오류", errorMessage = "SSL 설정 오류: ${e.message}") }; updateNotificationCombined() }
-                return
-            }
-        }
-        lifecycleScope.launch { _mqttUiState.update { it.copy(connectionStatus = "상태: MQTT 연결 중...", errorMessage = null) }; updateNotificationCombined() }
-        try {
-            mqttClient.connect(options, null, object : IMqttActionListener {
-                override fun onSuccess(asyncActionToken: IMqttToken?) { Log.d(TAG_MQTT, "MQTT Connect Action Success") }
-                override fun onFailure(asyncActionToken: IMqttToken?, exception: Throwable?) {
-                    val errorMsg = exception?.message ?: "Unknown"
-                    Log.e(TAG_MQTT, "MQTT Connect Action Failed: $errorMsg")
-                    lifecycleScope.launch { _mqttUiState.update { it.copy(isConnected = false, connectionStatus = "상태: MQTT 연결 실패", errorMessage = "연결 실패: $errorMsg") }; updateNotificationCombined() }
-                }
-            })
-        } catch (e: MqttException) {
-            Log.e(TAG_MQTT, "MQTT Connect Exception", e)
-            lifecycleScope.launch { _mqttUiState.update { it.copy(isConnected = false, connectionStatus = "상태: MQTT 연결 예외", errorMessage = "연결 예외: ${e.message}") }; updateNotificationCombined() }
-        }
-    }
-
-    private fun disconnectMqttInternal(userRequested: Boolean = false) {
-        if (!::mqttClient.isInitialized || !_mqttUiState.value.isConnected) {
-            Log.w(TAG_MQTT,"Disconnect ignored: Not connected/initialized.")
-            if (_mqttUiState.value.isConnected) {
-                lifecycleScope.launch { _mqttUiState.update { it.copy(isConnected = false, connectionStatus = "상태: 연결 끊김", errorMessage = null) }; updateNotificationCombined() }
-            }
-            return
-        }
-        Log.i(TAG_MQTT, "Disconnecting MQTT (User requested: $userRequested)...")
-        if (userRequested) {
-            lifecycleScope.launch { _mqttUiState.update { it.copy(connectionStatus = "상태: MQTT 연결 해제 중...") } }
-        }
-        try {
-            if (!userRequested && lifecycle.currentState == androidx.lifecycle.Lifecycle.State.DESTROYED) {
-                mqttClient.disconnectForcibly()
-                Log.i(TAG_MQTT, "MQTT disconnected forcibly during service shutdown.")
-            } else {
-                mqttClient.disconnect(null, object : IMqttActionListener {
-                    override fun onSuccess(token: IMqttToken?) { Log.d(TAG_MQTT, "MQTT Disconnect Action Success") }
-                    override fun onFailure(token: IMqttToken?, ex: Throwable?) { Log.e(TAG_MQTT, "MQTT Disconnect Action Failed", ex) }
-                })
-            }
-        } catch (e: MqttException) {
-            Log.e(TAG_MQTT, "MQTT Disconnect Exception", e)
-            if (_mqttUiState.value.isConnected) {
-                lifecycleScope.launch { _mqttUiState.update { it.copy(isConnected = false, connectionStatus = "상태: 연결 끊김 (해제 오류)", errorMessage = e.message) }; updateNotificationCombined() }
-            }
-        }
-    }
-
-    private fun subscribeMqtt(topic: String) {
-        if (!::mqttClient.isInitialized || !_mqttUiState.value.isConnected) {
-            Log.w(TAG_MQTT, "Cannot subscribe: MQTT client not connected.")
-            return
-        }
-        try {
-            mqttClient.subscribe(topic, 1, null, object : IMqttActionListener {
-                override fun onSuccess(token: IMqttToken?) { Log.i(TAG_MQTT, "Subscribed to $topic") }
-                override fun onFailure(token: IMqttToken?, ex: Throwable?) { Log.e(TAG_MQTT, "Failed to subscribe to $topic", ex) }
-            })
-        } catch (e: MqttException) { Log.e(TAG_MQTT, "Subscribe exception for $topic", e) }
-    }
-
-    private fun publishMqtt(topic: String, payload: String) {
-        if (!::mqttClient.isInitialized || !_mqttUiState.value.isConnected) {
-            Log.w(TAG_MQTT, "Cannot publish: MQTT client not connected.")
-            return
-        }
-        try {
-            val message = MqttMessage(payload.toByteArray()).apply { qos = 1; isRetained = false }
-            mqttClient.publish(topic, message, null, object : IMqttActionListener {
-                override fun onSuccess(token: IMqttToken?) { Log.d(TAG_MQTT, "Publish action success to $topic (Payload: $payload)") }
-                override fun onFailure(token: IMqttToken?, ex: Throwable?) { Log.e(TAG_MQTT, "Failed to publish to $topic", ex) }
-            })
-        } catch (e: MqttException) { Log.e(TAG_MQTT, "Publish exception for $topic", e) }
-    }
-
-    private inner class MqttCallbackHandler : MqttCallbackExtended {
-        override fun connectComplete(reconnect: Boolean, serverURI: String?) {
-            Log.i(TAG_MQTT, "MQTT Connect Complete. Reconnect=$reconnect")
-            lifecycleScope.launch {
-                _mqttUiState.update { it.copy(isConnected = true, connectionStatus = "상태: MQTT 연결됨", errorMessage = null) }
+        Log.i(TAG_TCP, "Attempting to connect TCP to $currentServerIp:$currentServerPort...")
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                _tcpUiState.update { it.copy(connectionStatus = "TCP/IP: 연결 중...", errorMessage = null) }
                 updateNotificationCombined()
-                subscribeMqtt(MQTT_SUBSCRIBE_TOPIC)
-            }
-        }
-        override fun connectionLost(cause: Throwable?) {
-            val errorMsg = cause?.message ?: "Unknown reason"
-            Log.e(TAG_MQTT, "MQTT Connection Lost: $errorMsg", cause)
-            lifecycleScope.launch {
-                _mqttUiState.update { it.copy(isConnected = false, connectionStatus = "상태: MQTT 연결 끊김", errorMessage = "연결 끊김: $errorMsg") }
-                updateNotificationCombined()
-            }
-        }
-        override fun messageArrived(topic: String?, message: MqttMessage?) {
-            if (topic == null || message == null) return
-            val msgPayload = message.toString()
-            Log.d(TAG_MQTT, "MQTT Message Arrived: Topic=$topic, Payload=$msgPayload")
-            val newItem = MqttMessageItem(topic = topic, payload = msgPayload)
-            lifecycleScope.launch {
-                _receivedMqttMessages.update { list -> (listOf(newItem) + list).take(MAX_MQTT_LOG_SIZE) }
-            }
-            if (topic == MQTT_SUBSCRIBE_TOPIC) {
-                lifecycleScope.launch {
-                    Log.d(TAG_MQTT, "Forwarding MQTT message to Hub for BLE: $msgPayload")
-                    CommunicationHub.emitMqttToBle(msgPayload)
-                }
-            }
-        }
-        override fun deliveryComplete(token: IMqttDeliveryToken?) { /* Log delivery */ }
-    }
 
-    private fun listenForBleMessages() {
-        lifecycleScope.launch {
-            CommunicationHub.bleToMqttFlow.collect { message ->
-                Log.i(TAG_MQTT, "Service received message from Hub (BLE->MQTT): $message")
-                if (_mqttUiState.value.isConnected) {
-                    Log.d(TAG_MQTT, "Service publishing BLE message to MQTT topic $MQTT_PUBLISH_TOPIC")
-                    publishMqtt(MQTT_PUBLISH_TOPIC, message)
+                tcpSocket = Socket()
+                tcpSocket?.connect(InetSocketAddress(currentServerIp, currentServerPort), 5000)
+
+                if (tcpSocket?.isConnected == true) {
+                    tcpPrintWriter = PrintWriter(tcpSocket!!.getOutputStream(), true)
+                    tcpBufferedReader = BufferedReader(InputStreamReader(tcpSocket!!.getInputStream()))
+                    _tcpUiState.update { it.copy(isConnected = true, connectionStatus = "TCP/IP: 연결됨", errorMessage = null) }
+                    Log.i(TAG_TCP, "TCP Connected to $currentServerIp:$currentServerPort")
+                    updateNotificationCombined()
+                    startTcpReceiveLoop()
                 } else {
-                    Log.w(TAG_MQTT, "Service cannot publish BLE message: MQTT not connected.")
+                    throw IOException("Socket connect failed post-attempt")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG_TCP, "TCP Connection Error to $currentServerIp:$currentServerPort", e)
+                _tcpUiState.update { it.copy(isConnected = false, connectionStatus = "TCP/IP: 연결 실패", errorMessage = "연결 오류: ${e.message}") }
+                updateNotificationCombined()
+                closeTcpSocketResources()
+            }
+        }
+    }
+
+    private fun startTcpReceiveLoop() {
+        tcpReceiveJob?.cancel()
+        tcpReceiveJob = lifecycleScope.launch(Dispatchers.IO) {
+            Log.d(TAG_TCP, "Starting TCP receive loop...")
+            try {
+                while (isActive && tcpSocket?.isConnected == true && tcpBufferedReader != null) {
+                    val line = tcpBufferedReader?.readLine()
+                    if (line != null) {
+                        Log.i(TAG_TCP, "TCP Received: $line")
+                        val newItem = TcpMessageItem(source = "$currentServerIp:$currentServerPort", payload = line)
+                        _receivedTcpMessages.update { list -> (listOf(newItem) + list).take(MAX_TCP_LOG_SIZE) }
+
+                        Log.d(TAG_TCP, "Forwarding TCP message to Hub for BLE: $line")
+                        CommunicationHub.emitTcpToBle(line)
+                    } else {
+                        Log.w(TAG_TCP, "TCP readLine returned null, server might have closed connection.")
+                        break
+                    }
+                }
+            } catch (e: IOException) {
+                Log.e(TAG_TCP, "TCP Receive Loop IOException (Connection likely lost)", e)
+            } catch (e: Exception) {
+                Log.e(TAG_TCP, "TCP Receive Loop Exception", e)
+            } finally {
+                Log.d(TAG_TCP, "TCP receive loop ended.")
+                if (isActive) {
+                    disconnectTcpInternal(userRequested = false, "수신 중 연결 끊김")
                 }
             }
         }
     }
 
-    private fun listenForMqttMessages() {
+    private fun sendTcpData(message: String) {
+        if (tcpSocket?.isConnected != true || tcpPrintWriter == null) {
+            Log.w(TAG_TCP, "Cannot send TCP data: Not connected.")
+            _tcpUiState.update { it.copy(errorMessage = "TCP 메시지 전송 실패: 연결 안됨") }
+            return
+        }
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                tcpPrintWriter?.println(message)
+                Log.i(TAG_TCP, "TCP Sent: $message")
+                val sentItem = TcpMessageItem(source = "클라이언트 -> 서버", payload = message)
+                _receivedTcpMessages.update { list -> (listOf(sentItem) + list).take(MAX_TCP_LOG_SIZE) }
+            } catch (e: Exception) {
+                Log.e(TAG_TCP, "TCP Send Error", e)
+                _tcpUiState.update { it.copy(errorMessage = "TCP 메시지 전송 오류: ${e.message}") }
+                disconnectTcpInternal(userRequested = false, "전송 중 연결 끊김")
+            }
+        }
+    }
+
+    private fun disconnectTcpInternal(userRequested: Boolean, reason: String? = null) {
+        if (tcpSocket == null && !_tcpUiState.value.isConnected && !_tcpUiState.value.connectionStatus.contains("연결 중")) {
+            Log.d(TAG_TCP, "TCP Disconnect ignored: Already disconnected or not initialized.")
+            return
+        }
+        Log.i(TAG_TCP, "Disconnecting TCP (User requested: $userRequested, Reason: $reason)...")
+        tcpReceiveJob?.cancel()
+        tcpReceiveJob = null
+        closeTcpSocketResources()
+
+        val statusMessage = reason ?: if (userRequested) "연결 해제됨" else "연결 끊김"
+        _tcpUiState.update { it.copy(isConnected = false, connectionStatus = "TCP/IP: $statusMessage", errorMessage = if (reason != null && !userRequested) reason else null) }
+        updateNotificationCombined()
+    }
+
+    private fun closeTcpSocketResources() {
+        try { tcpPrintWriter?.close() } catch (e: IOException) { Log.e(TAG_TCP, "Error closing PrintWriter", e) }
+        try { tcpBufferedReader?.close() } catch (e: IOException) { Log.e(TAG_TCP, "Error closing BufferedReader", e) }
+        try { tcpSocket?.close() } catch (e: IOException) { Log.e(TAG_TCP, "Error closing socket", e) }
+        tcpSocket = null
+        tcpPrintWriter = null
+        tcpBufferedReader = null
+        Log.d(TAG_TCP, "TCP socket resources closed.")
+    }
+
+    private fun listenForBleToTcpMessages() { // BLE -> TCP
         lifecycleScope.launch {
-            CommunicationHub.mqttToBleFlow.collect { message ->
-                Log.i(TAG_BLE, "Service received message from Hub (MQTT->BLE): $message")
+            CommunicationHub.bleToTcpFlow.collect { message ->
+                Log.i(TAG_TCP, "Service received message from Hub (BLE->TCP): $message")
+                if (_tcpUiState.value.isConnected) {
+                    Log.d(TAG_TCP, "Service sending BLE message via TCP")
+                    sendTcpData(message)
+                } else {
+                    Log.w(TAG_TCP, "Service cannot send BLE message via TCP: Not connected.")
+                }
+            }
+        }
+    }
+
+    private fun listenForTcpToBleMessages() { // TCP -> BLE
+        lifecycleScope.launch {
+            CommunicationHub.tcpToBleFlow.collect { message ->
+                Log.i(TAG_BLE, "Service received message from Hub (TCP->BLE): $message")
                 val trimmedMessage = message.trim()
                 var eventDescription: String? = null
                 when (trimmedMessage.lowercase()) {
-                    "siren" -> eventDescription = "사이렌 감지됨 (MQTT)"
-                    "horn" -> eventDescription = "경적 감지됨 (MQTT)"
-                    "boom" -> eventDescription = "폭발음 감지됨 (MQTT)"
+                    "siren" -> eventDescription = "사이렌 감지됨 (TCP)"
+                    "horn" -> eventDescription = "경적 감지됨 (TCP)"
+                    "boom" -> eventDescription = "폭발음 감지됨 (TCP)"
                 }
                 if (eventDescription != null) { addDetectionEvent(eventDescription) }
+
                 if (connectedThread != null && _bleUiState.value.connectedDeviceName != null) {
-                    Log.d(TAG_BLE, "Service forwarding MQTT message to BLE device.")
-                    connectedThread?.write(message.toByteArray()) // write 함수 참조 오류 가능성
+                    Log.d(TAG_BLE, "Service forwarding TCP message to BLE device.")
+                    connectedThread?.write(message.toByteArray())
                 } else {
-                    Log.w(TAG_BLE, "Service cannot forward MQTT message to BLE: Not connected.")
+                    Log.w(TAG_BLE, "Service cannot forward TCP message to BLE: Not connected.")
                 }
             }
         }
@@ -526,15 +500,15 @@ class CommunicationService : LifecycleService() {
 
     private fun updateNotificationCombined() {
         val bleStatus = _bleUiState.value.connectedDeviceName ?: "끊김"
-        val mqttStatus = if (_mqttUiState.value.isConnected) "연결됨" else "끊김"
-        val contentText = "BLE: $bleStatus, MQTT: $mqttStatus"
+        val tcpStatusText = _tcpUiState.value.connectionStatus
+        val contentText = "BLE: $bleStatus, $tcpStatusText"
         updateNotification(contentText)
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val name = "MQBL 통신 서비스"
-            val descriptionText = "백그라운드 BLE 및 MQTT 연결 상태 알림"
+            val descriptionText = "백그라운드 BLE 및 TCP/IP 연결 상태 알림" // 설명 변경
             val importance = NotificationManager.IMPORTANCE_LOW
             val channel = NotificationChannel(NOTIFICATION_CHANNEL_ID, name, importance).apply {
                 description = descriptionText
@@ -581,7 +555,7 @@ class CommunicationService : LifecycleService() {
         override fun run() {
             if (mmSocket == null) { connectThread = null; return }
             try {
-                bluetoothAdapter?.cancelDiscovery() // Service 멤버 변수 접근
+                bluetoothAdapter?.cancelDiscovery()
             } catch (e: SecurityException){
                 Log.e(TAG_BLE, "cancelDiscovery failed", e)
             }
@@ -646,11 +620,10 @@ class CommunicationService : LifecycleService() {
                 lifecycleScope.launch { connectionLost() }
             }
         }
-
         fun cancel() {
             isRunning = false
             try { mmSocket.close() } catch (e: IOException) { Log.e(TAG_BLE, "ConnectedThread: Socket close error", e) }
         }
     }
-
-} // CommunicationServic
+    // --- BLE 통신 스레드 끝 ---
+}

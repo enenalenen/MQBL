@@ -1,62 +1,52 @@
-// app/build.gradle.kts (for MQBL Project)
+// app/build.gradle.kts (for MQBL Project - MQTT Dependency Removed)
 
 plugins {
-    // Use aliases from the merged libs.versions.toml
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
-    // Use the unified kotlin-compose alias
     alias(libs.plugins.kotlin.compose)
 }
 
 android {
-    // New namespace for the merged project
     namespace = "com.example.mqbl"
-    compileSdk = 35 // Keep from original projects
+    compileSdk = 35
 
     defaultConfig {
-        // New application ID
         applicationId = "com.example.mqbl"
-        // Use the higher minSdk from BLEv2 to ensure compatibility for both features
         minSdk = 29
-        targetSdk = 35 // Keep from original projects
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
-            useSupportLibrary = true // Include from MQTTTest
+            useSupportLibrary = true
         }
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false // Keep as false for now, enable and configure ProGuard if needed
+            isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro" // Remember to configure this file if minify is enabled
+                "proguard-rules.pro"
             )
         }
     }
     compileOptions {
-        // Use Java 11 (from BLEv2, more modern)
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
     kotlinOptions {
-        // Match Java 11
         jvmTarget = "11"
     }
     buildFeatures {
-        // Enable Jetpack Compose
         compose = true
     }
     composeOptions {
-        // Set Compose Compiler version using the alias from merged TOML
         kotlinCompilerExtensionVersion = libs.versions.composeCompiler.get()
     }
-    packaging { // Use the modern 'packaging' block name
+    packaging {
         resources {
-            // Include excludes from MQTTTest to prevent license conflicts
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
@@ -64,11 +54,13 @@ android {
 
 dependencies {
 
-    // Core & AppCompat (AppCompat/ActivityKTX added for consistency from BLEv2)
+    // Core & AppCompat
     implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.appcompat) // Added via merged TOML
-    implementation(libs.androidx.activity.ktx) // Added via merged TOML
+    implementation(libs.androidx.appcompat)
+    implementation(libs.androidx.activity.ktx)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.lifecycle.service) // For LifecycleService
 
     // Jetpack Compose BOM and implementation dependencies
     implementation(platform(libs.androidx.compose.bom))
@@ -76,31 +68,28 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
+    implementation(libs.androidx.material.icons.extended) // For additional icons
 
-    // Navigation Compose (Essential for page switching between BLE and MQTT screens)
+    // Navigation Compose
     implementation(libs.androidx.navigation.compose)
 
-    // Paho MQTT Library (Essential for MQTT functionality)
-    implementation(libs.paho.mqtt.android)
+    // --- Paho MQTT Library 제거 ---
+    // implementation("com.github.hannesa2:paho.mqtt.android:4.3") // 직접 선언 방식 제거
+    // implementation(libs.paho.mqtt.android) // 버전 카탈로그 방식도 사용 안 함
+    // --- Paho MQTT Library 제거 끝 ---
 
+    // Lifecycle for ViewModel and LiveData (collectAsStateWithLifecycle)
+    implementation(libs.androidx.lifecycle.runtime.compose) // For collectAsStateWithLifecycle
+    implementation(libs.androidx.lifecycle.viewmodel.compose) // For viewModel()
 
     // Testing dependencies
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
-    androidTestImplementation(platform(libs.androidx.compose.bom)) // Compose BOM for testing
+    androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.ui.test.junit4)
 
     // Debug dependencies
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
-
-    implementation(libs.androidx.material3)
-    implementation(libs.androidx.material.icons.extended)
-
-    implementation(libs.androidx.lifecycle.runtime.ktx)
-    implementation(libs.androidx.lifecycle.runtime.compose)
-    implementation(libs.androidx.lifecycle.service)
-    implementation(libs.androidx.activity.compose)
-
 }

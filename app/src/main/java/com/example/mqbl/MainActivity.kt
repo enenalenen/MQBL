@@ -2,12 +2,13 @@ package com.example.mqbl
 
 // --- Android SDK ---
 import android.Manifest
+import android.app.Activity
 import android.content.Intent
-// import android.graphics.Color as AndroidGraphicsColor // 더 이상 직접 사용 안 함
+// import android.graphics.Color as AndroidGraphicsColor
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
-// import android.view.WindowManager // 테마에서 처리하므로 직접 플래그 설정 안 함
+// import android.view.WindowManager
 // --- Activity ---
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -24,11 +25,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect // SideEffect로 상태 표시줄 아이콘 색상 동적 변경
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color // Compose 색상 정의용
+import androidx.compose.ui.platform.LocalView // SideEffect에서 View를 가져오기 위해
 import androidx.compose.ui.tooling.preview.Preview
 // --- Lifecycle & ViewModel ---
 import androidx.lifecycle.Lifecycle
@@ -48,43 +50,45 @@ import com.example.mqbl.navigation.bottomNavItems
 import com.example.mqbl.service.CommunicationService
 import com.example.mqbl.ui.ble.BleScreen
 import com.example.mqbl.ui.ble.BleViewModel
-import com.example.mqbl.ui.mqtt.MqttScreen
-import com.example.mqbl.ui.mqtt.MqttViewModel
+// --- 수정: MQTT 관련 import를 TCP/IP 관련 import로 변경 ---
+import com.example.mqbl.ui.tcp.TcpScreen // MqttScreen -> TcpScreen
+import com.example.mqbl.ui.tcp.TcpViewModel // MqttViewModel -> TcpViewModel
+// --- 수정 끝 ---
 import com.example.mqbl.ui.settings.SettingsScreen
-import androidx.compose.ui.platform.LocalView // SideEffect에서 View를 가져오기 위해
-import android.app.Activity // view.context를 Activity로 캐스팅하기 위해
+// import com.example.mqbl.ui.theme.MQBLTheme // 필요시 테마 import
+
 
 // --- 다크 모드 및 라이트 모드 색상 정의 ---
 private val DarkColorScheme = darkColorScheme(
     primary = Color(0xFFBB86FC),
     secondary = Color(0xFF03DAC6),
     tertiary = Color(0xFF3700B3),
-    background = Color(0xFF121212),
-    surface = Color(0xFF121212),
+    background = Color(0xFF121212), // 어두운 배경
+    surface = Color(0xFF1E1E1E),   // 컴포넌트 표면 (로그 창 배경보다 약간 밝게)
     onPrimary = Color.Black,
     onSecondary = Color.Black,
     onTertiary = Color.White,
-    onBackground = Color.White,
-    onSurface = Color.White
+    onBackground = Color.White,    // 배경 위 텍스트
+    onSurface = Color.White        // 표면 위 텍스트
 )
 
 private val LightColorScheme = lightColorScheme(
     primary = Color(0xFF6200EE),
     secondary = Color(0xFF03DAC6),
     tertiary = Color(0xFF3700B3),
-    background = Color(0xFFFFFFFF),
+    background = Color(0xFFFFFFFF), // 밝은 배경
     surface = Color(0xFFFFFFFF),
     onPrimary = Color.White,
     onSecondary = Color.Black,
     onTertiary = Color.White,
-    onBackground = Color.Black,
-    onSurface = Color.Black
+    onBackground = Color.Black,    // 배경 위 텍스트
+    onSurface = Color.Black        // 표면 위 텍스트
 )
 
 // --- 앱 테마 함수 정의 ---
 @Composable
 fun MQBLTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(), // 시스템 설정 감지
+    darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit
 ) {
     val colorScheme = if (darkTheme) {
@@ -93,19 +97,16 @@ fun MQBLTheme(
         LightColorScheme
     }
 
-    // --- 상태 표시줄 아이콘 색상 동적 변경 ---
-    // SideEffect를 사용하여 Composable이 리컴포지션될 때마다 실행
-    // (또는 LaunchedEffect를 사용하여 darkTheme 값이 변경될 때만 실행 가능)
-    val view = LocalView.current // Accompanist SystemUIController 대신 직접 WindowInsetsController 사용
-    if (!view.isInEditMode) { // 프리뷰 모드가 아닐 때만 실행
+    val view = LocalView.current
+    if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
             WindowInsetsControllerCompat(window, view).isAppearanceLightStatusBars = !darkTheme
-            // !darkTheme: 라이트 모드(darkTheme=false)일 때 true (어두운 아이콘),
-            //             다크 모드(darkTheme=true)일 때 false (밝은 아이콘)
+            // 상태 표시줄 배경색은 테마의 surface 색상을 따르도록 하거나,
+            // themes.xml의 android:statusBarColor 설정을 따르도록 할 수 있습니다.
+            // 여기서는 아이콘 색상만 제어합니다.
         }
     }
-    // ------------------------------------
 
     MaterialTheme(
         colorScheme = colorScheme,
@@ -128,24 +129,24 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // --- 시스템 상태 표시줄 기본 설정 ---
-        // 앱 컨텐츠가 시스템 바 뒤로 그려지지 않도록 설정
         WindowCompat.setDecorFitsSystemWindows(window, true)
-        // 상태 표시줄 배경색은 테마에서 android:statusBarColor로 설정하거나,
-        // 여기서 window.statusBarColor = AndroidGraphicsColor.TRANSPARENT 등으로 설정 후
-        // MQBLTheme 내부 또는 각 화면 최상단에 배경색을 가진 Composable을 배치하여 제어할 수도 있음.
-        // 현재는 themes.xml의 android:statusBarColor = @android:color/black 설정을 우선 따름.
-        // 아이콘 색상은 MQBLTheme 내부에서 동적으로 제어.
-        // ---------------------------------
+        // 상태 표시줄 아이콘 색상은 MQBLTheme 내부에서 동적으로 제어
 
         startCommunicationService()
         setContent {
-            MQBLTheme { // MQBLTheme이 상태 표시줄 아이콘 색상 제어
-                MainAppNavigation(
-                    requestPermissions = { permissionsToRequest ->
-                        requestMultiplePermissionsLauncher.launch(permissionsToRequest)
-                    }
-                )
+            MQBLTheme {
+                // --- 추가: 최상위 Surface로 전체 배경색 적용 ---
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background // 테마의 배경색 사용
+                ) {
+                    MainAppNavigation(
+                        requestPermissions = { permissionsToRequest ->
+                            requestMultiplePermissionsLauncher.launch(permissionsToRequest)
+                        }
+                    )
+                }
+                // --- 추가 끝 ---
             }
         }
     }
@@ -166,7 +167,7 @@ class MainActivity : ComponentActivity() {
 fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
     val navController = rememberNavController()
 
-    Scaffold(
+    Scaffold( // Scaffold 자체는 배경색을 갖지만, 그 위의 Surface가 전체를 덮음
         bottomBar = {
             NavigationBar {
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -209,17 +210,23 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
                     onDisconnect = { /* SettingsScreen에서 처리 */ }
                 )
             }
-            composable(Screen.Mqtt.route) {
-                val mqttViewModel: MqttViewModel = viewModel()
-                val uiState by mqttViewModel.uiState.collectAsStateWithLifecycle()
-                val receivedMessages by mqttViewModel.receivedMessages.collectAsStateWithLifecycle()
+            composable(Screen.Tcp.route) { // TCP 탭
+                val tcpViewModel: TcpViewModel = viewModel()
+                val tcpUiState by tcpViewModel.tcpUiState.collectAsStateWithLifecycle()
+                val receivedTcpMessages by tcpViewModel.receivedTcpMessages.collectAsStateWithLifecycle()
+                val currentServerIp by tcpViewModel.serverIp.collectAsStateWithLifecycle()
+                val currentServerPort by tcpViewModel.serverPort.collectAsStateWithLifecycle()
 
-                MqttScreen(
-                    uiState = uiState,
-                    receivedMessages = receivedMessages,
+                TcpScreen(
+                    uiState = tcpUiState,
+                    receivedMessages = receivedTcpMessages,
+                    currentServerIp = currentServerIp,
+                    currentServerPort = currentServerPort,
+                    onServerIpChange = tcpViewModel::updateServerIp,
+                    onServerPortChange = tcpViewModel::updateServerPort,
                     onConnect = { /* SettingsScreen에서 처리 */ },
                     onDisconnect = { /* SettingsScreen에서 처리 */ },
-                    onPublish = mqttViewModel::publish
+                    onSendMessage = tcpViewModel::sendMessage
                 )
             }
             composable(Screen.Settings.route) {
@@ -227,8 +234,11 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
                 val bleUiState by bleViewModel.uiState.collectAsStateWithLifecycle()
                 val bondedDevices by bleViewModel.bondedDevices.collectAsStateWithLifecycle()
 
-                val mqttViewModel: MqttViewModel = viewModel()
-                val mqttUiState by mqttViewModel.uiState.collectAsStateWithLifecycle()
+                val tcpViewModel: TcpViewModel = viewModel()
+                val tcpUiState by tcpViewModel.tcpUiState.collectAsStateWithLifecycle()
+                val currentServerIp by tcpViewModel.serverIp.collectAsStateWithLifecycle()
+                val currentServerPort by tcpViewModel.serverPort.collectAsStateWithLifecycle()
+
 
                 LaunchedEffect(key1 = bleViewModel) {
                     bleViewModel.permissionRequestEvent.collectLatest {
@@ -267,9 +277,13 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
                     onRequestBlePermissions = bleViewModel::checkOrRequestPermissions,
                     onBleDisconnect = bleViewModel::disconnect,
                     onSendVibrationValue = bleViewModel::sendValue,
-                    mqttUiState = mqttUiState,
-                    onMqttConnect = mqttViewModel::connect,
-                    onMqttDisconnect = mqttViewModel::disconnect
+                    tcpUiState = tcpUiState,
+                    currentServerIp = currentServerIp,
+                    currentServerPort = currentServerPort,
+                    onServerIpChange = tcpViewModel::updateServerIp,
+                    onServerPortChange = tcpViewModel::updateServerPort,
+                    onTcpConnect = tcpViewModel::connect,
+                    onTcpDisconnect = tcpViewModel::disconnect
                 )
             }
         }
