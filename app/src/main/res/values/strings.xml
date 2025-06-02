@@ -1,3 +1,14 @@
 <resources>
     <string name="app_name">MQBL</string>
+
+    <string name="wifi_direct_settings_title">Wi-Fi Direct 설정</string>
+    <string name="discover_wifi_direct_peers">주변 기기 검색 (WD)</string>
+    <string name="disconnect_wifi_direct">WD 연결 해제</string>
+    <string name="no_wifi_direct_peers_found">검색된 Wi-Fi Direct 기기 없음</string>
+    <string name="wifi_direct_status_template">Wi-Fi Direct: %s</string>
+    <string name="wifi_direct_request_permissions">Wi-Fi Direct 권한 요청</string>
+    <string name="send_wifi_direct_message">WD 메시지 전송</string>
+    <string name="message_to_send_wifi_direct">보낼 메시지 (WD)</string>
+    <string name="wifi_direct_logs_title">Wi-Fi Direct 수신 로그:</string>
+
 </resources>
