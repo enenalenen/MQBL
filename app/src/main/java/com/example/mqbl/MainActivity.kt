@@ -42,6 +42,7 @@ import com.example.mqbl.service.CommunicationService
 import com.example.mqbl.ui.ble.BleScreen
 import com.example.mqbl.ui.ble.BleViewModel
 import com.example.mqbl.ui.settings.SettingsScreen
+import com.example.mqbl.ui.settings.SettingsViewModel
 import com.example.mqbl.ui.tcp.TcpScreen
 import com.example.mqbl.ui.tcp.TcpViewModel
 import com.example.mqbl.ui.theme.MQBLTheme
@@ -49,18 +50,12 @@ import com.example.mqbl.ui.wifidirect.WifiDirectViewModel
 import kotlinx.coroutines.flow.collectLatest
 
 
-// --- 다크 모드 및 라이트 모드 색상 정의 (기존과 동일 또는 테마 파일에서 가져오기) ---
-// private val DarkColorScheme = darkColorScheme(...)
-// private val LightColorScheme = lightColorScheme(...)
-
 class MainActivity : ComponentActivity() {
 
     private val requestMultiplePermissionsLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
             Log.d("MainActivity", "Permission Result Received: $permissions")
-            // 각 ViewModel에 권한 결과 알림 (선택 사항, ViewModel에서 재확인 가능)
-            // bleViewModel?.onPermissionsResult(permissions)
-            // wifiDirectViewModel?.onPermissionsResult(permissions)
+            // 권한 요청 결과는 각 ViewModel 또는 화면의 onResume에서 다시 확인하여 처리
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -68,9 +63,14 @@ class MainActivity : ComponentActivity() {
 
         WindowCompat.setDecorFitsSystemWindows(window, true)
 
+        // --- 수정: 서비스 시작 로직 변경 ---
+        // 이제 서비스는 설정 값에 따라 스스로 포그라운드 여부를 결정하므로,
+        // 여기서는 단순히 서비스를 시작하기만 하면 됩니다.
         startCommunicationService()
+        // --- 수정 끝 ---
+
         setContent {
-            MQBLTheme { // 실제 정의된 테마 사용
+            MQBLTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
@@ -87,7 +87,9 @@ class MainActivity : ComponentActivity() {
 
     private fun startCommunicationService() {
         val serviceIntent = Intent(this, CommunicationService::class.java)
-            startForegroundService(serviceIntent)
+        // startForegroundService 대신 startService 사용.
+        // 서비스 내부에서 설정에 따라 포그라운드로 전환할지 결정함.
+        startService(serviceIntent)
         Log.i("MainActivity", "CommunicationService started.")
     }
 }
@@ -160,6 +162,10 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
                 )
             }
             composable(Screen.Settings.route) {
+                // --- 수정: SettingsViewModel 추가 및 연결 ---
+                val settingsViewModel: SettingsViewModel = viewModel()
+                val settingsUiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
+
                 val bleViewModel: BleViewModel = viewModel()
                 val bleUiState by bleViewModel.uiState.collectAsStateWithLifecycle()
                 val bondedDevices by bleViewModel.bondedDevices.collectAsStateWithLifecycle()
@@ -169,8 +175,9 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
                 val currentServerIp by tcpViewModel.serverIp.collectAsStateWithLifecycle()
                 val currentServerPort by tcpViewModel.serverPort.collectAsStateWithLifecycle()
 
-                val wifiDirectViewModel: WifiDirectViewModel = viewModel() // Wi-Fi Direct ViewModel 추가
+                val wifiDirectViewModel: WifiDirectViewModel = viewModel()
                 val wifiDirectUiState by wifiDirectViewModel.wifiDirectUiState.collectAsStateWithLifecycle()
+                // --- 수정 끝 ---
 
 
                 // BLE 권한 요청 이벤트 리스너
@@ -181,10 +188,10 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
                             arrayOf(
                                 Manifest.permission.BLUETOOTH_CONNECT,
                                 Manifest.permission.BLUETOOTH_SCAN,
-                                Manifest.permission.ACCESS_FINE_LOCATION // BLE 스캔에 위치 권한도 필요할 수 있음
+                                Manifest.permission.ACCESS_FINE_LOCATION
                             )
                         } else {
-                            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION) // 구버전용
+                            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
                         }
                         if (permissionsToRequest.isNotEmpty()) {
                             requestPermissions(permissionsToRequest)
@@ -192,11 +199,10 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
                     }
                 }
 
-                // Wi-Fi Direct 권한 요청 함수 (SettingsScreen에서 호출)
                 val requestWifiDirectPerms = {
                     Log.d("SettingsScreen", "Wi-Fi Direct Permission request initiated from UI.")
                     val wdPermissions = mutableListOf(
-                        Manifest.permission.ACCESS_FINE_LOCATION // Wi-Fi Direct에 필수
+                        Manifest.permission.ACCESS_FINE_LOCATION
                     )
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         wdPermissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
@@ -206,12 +212,12 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
 
 
                 val lifecycleOwner = LocalLifecycleOwner.current
-                DisposableEffect(lifecycleOwner, bleViewModel, wifiDirectViewModel) { // wifiDirectViewModel 추가
+                DisposableEffect(lifecycleOwner, bleViewModel, wifiDirectViewModel) {
                     val observer = LifecycleEventObserver { _, event ->
                         if (event == Lifecycle.Event.ON_RESUME) {
                             Log.d("SettingsScreen", "ON_RESUME detected, re-checking permissions.")
                             bleViewModel.checkOrRequestPermissions()
-                            wifiDirectViewModel.discoverPeers() // 화면 재진입 시 피어 검색 시도 (서비스에서 권한 확인 후 실제 동작)
+                            wifiDirectViewModel.discoverPeers()
                         }
                     }
                     lifecycleOwner.lifecycle.addObserver(observer)
@@ -221,6 +227,9 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
                 }
 
                 SettingsScreen(
+                    // App Settings
+                    settingsUiState = settingsUiState,
+                    onBackgroundExecutionToggled = settingsViewModel::toggleBackgroundExecution,
                     // BLE
                     bleUiState = bleUiState,
                     bondedDevices = bondedDevices,
@@ -253,7 +262,7 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
 @Preview(showBackground = true, uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES, name = "Dark Mode Preview")
 @Composable
 fun DefaultPreview() {
-    MQBLTheme { // 실제 정의된 테마 사용
+    MQBLTheme {
         MainAppNavigation(requestPermissions = {})
     }
 }

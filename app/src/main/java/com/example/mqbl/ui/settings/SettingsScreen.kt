@@ -31,6 +31,10 @@ import java.net.InetAddress // Preview용 import
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
+    // App Settings
+    settingsUiState: SettingsUiState,
+    onBackgroundExecutionToggled: (Boolean) -> Unit,
+
     // BLE
     bleUiState: BleUiState,
     bondedDevices: List<BluetoothDevice>,
@@ -50,15 +54,15 @@ fun SettingsScreen(
 
     // Wi-Fi Direct
     wifiDirectUiState: WifiDirectUiState,
-    onRequestWifiDirectPermissions: () -> Unit, // 권한 요청 콜백 추가
+    onRequestWifiDirectPermissions: () -> Unit,
     onDiscoverWifiDirectPeers: () -> Unit,
     onConnectToWifiDirectPeer: (WifiP2pDevice) -> Unit,
     onDisconnectWifiDirect: () -> Unit,
-    onSendWifiDirectMessage: (String) -> Unit // Wi-Fi Direct 메시지 전송 콜백
+    onSendWifiDirectMessage: (String) -> Unit
 ) {
     var isBleDropdownExpanded by remember { mutableStateOf(false) }
     var selectedBleDeviceDisplay by remember { mutableStateOf("페어링된 BLE 기기 선택") }
-    var currentVibrationValue by remember { mutableIntStateOf(5) } // 기본값 5로 유지
+    var currentVibrationValue by remember { mutableIntStateOf(5) }
     var wifiDirectMessageToSend by remember { mutableStateOf("Hello Wi-Fi Direct!") }
 
 
@@ -71,7 +75,7 @@ fun SettingsScreen(
         }
     }
 
-    LazyColumn( // 전체 화면 스크롤 가능하도록 LazyColumn 사용
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp)
@@ -79,6 +83,37 @@ fun SettingsScreen(
         item {
             Text("연결 및 장치 설정", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(bottom = 16.dp))
         }
+
+        // --- 앱 설정 섹션 ---
+        item {
+            Card(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(stringResource(id = R.string.app_settings_title), style = MaterialTheme.typography.titleMedium)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(stringResource(id = R.string.background_execution_title), style = MaterialTheme.typography.bodyLarge)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                stringResource(id = R.string.background_execution_summary),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Switch(
+                            checked = settingsUiState.isBackgroundExecutionEnabled,
+                            onCheckedChange = onBackgroundExecutionToggled
+                        )
+                    }
+                }
+            }
+        }
+        // --- 앱 설정 섹션 끝 ---
 
         // --- BLE 연결 설정 섹션 ---
         item {
@@ -303,11 +338,14 @@ fun SettingsScreen(
     }
 }
 
+
 @Preview(showBackground = true)
 @Composable
 fun SettingsScreenPreview() {
     MaterialTheme {
         SettingsScreen(
+            settingsUiState = SettingsUiState(isBackgroundExecutionEnabled = true),
+            onBackgroundExecutionToggled = {},
             bleUiState = BleUiState(status = "BLE 상태: 연결됨", connectedDeviceName = "미리보기 BLE 장치"),
             bondedDevices = emptyList(),
             onDeviceSelected = {}, onRequestBlePermissions = {}, onBleDisconnect = {}, onSendVibrationValue = {},
@@ -317,17 +355,16 @@ fun SettingsScreenPreview() {
             wifiDirectUiState = WifiDirectUiState(
                 isWifiDirectEnabled = true,
                 statusText = "Wi-Fi Direct: 미리보기 연결됨",
-                errorMessage = null, // Preview에서는 에러 메시지 없음으로 가정
+                errorMessage = null,
                 connectedDeviceName = "미리보기 WD 장치",
-                peers = emptyList(), // WifiP2pDevice 직접 생성 문제 회피
-                connectionInfo = WifiP2pInfo().apply { // WifiP2pInfo import 필요
+                peers = emptyList(),
+                connectionInfo = WifiP2pInfo().apply {
                     groupFormed = true
                     isGroupOwner = false
                     try {
-                        // 실제 IP 주소 대신 더미 값 사용 또는 null 처리
-                        groupOwnerAddress = InetAddress.getByName("192.168.49.1") // InetAddress import 필요
+                        groupOwnerAddress = InetAddress.getByName("192.168.49.1")
                     } catch (e: Exception) {
-                        groupOwnerAddress = null // 예외 발생 시 null
+                        groupOwnerAddress = null
                     }
                 },
                 receivedDataLog = listOf("<- Hello from peer!", "-> Hi there!")

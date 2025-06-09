@@ -33,6 +33,7 @@ import androidx.lifecycle.lifecycleScope
 import com.example.mqbl.MainActivity
 import com.example.mqbl.R
 import com.example.mqbl.common.CommunicationHub
+import com.example.mqbl.data.SettingsRepository
 import com.example.mqbl.ui.ble.BleUiState
 import com.example.mqbl.ui.ble.DetectionEvent
 import com.example.mqbl.ui.tcp.TcpMessageItem
@@ -83,6 +84,11 @@ private const val SOCKET_TIMEOUT = 5000 // 소켓 연결 타임아웃 (ms)
 
 class CommunicationService : LifecycleService() {
 
+    companion object {
+        const val ACTION_START_FOREGROUND = "com.example.mqbl.action.START_FOREGROUND"
+        const val ACTION_STOP_FOREGROUND = "com.example.mqbl.action.STOP_FOREGROUND"
+    }
+
     inner class LocalBinder : Binder() {
         fun getService(): CommunicationService = this@CommunicationService
         // BLE
@@ -96,6 +102,8 @@ class CommunicationService : LifecycleService() {
         fun getWifiDirectUiStateFlow(): StateFlow<WifiDirectUiState> = _wifiDirectUiState.asStateFlow()
     }
     private val binder = LocalBinder()
+
+    private lateinit var settingsRepository: SettingsRepository
 
     // BLE
     private lateinit var bluetoothManager: BluetoothManager
@@ -130,6 +138,7 @@ class CommunicationService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         Log.i(TAG_SERVICE, "Service onCreate")
+        settingsRepository = SettingsRepository(this)
         createNotificationChannel()
         initializeBle()
         initializeWifiDirect() // Wi-Fi Direct 초기화
@@ -141,9 +150,35 @@ class CommunicationService : LifecycleService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
-        Log.i(TAG_SERVICE, "Service onStartCommand Received")
-        startForeground(NOTIFICATION_ID, createNotification("서비스 실행 중..."))
-        return START_STICKY
+        val action = intent?.action
+        Log.i(TAG_SERVICE, "Service onStartCommand Received with action: $action")
+
+        when (action) {
+            ACTION_START_FOREGROUND -> {
+                // 포그라운드 서비스 시작 명령
+                startForeground(NOTIFICATION_ID, createNotification("서비스 실행 중..."))
+                Log.i(TAG_SERVICE, "Foreground service started explicitly.")
+            }
+            ACTION_STOP_FOREGROUND -> {
+                // 포그라운드 서비스 중지 및 서비스 완전 종료 명령
+                Log.i(TAG_SERVICE, "Stopping foreground service and self...")
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf() // 서비스 자체를 종료
+            }
+            else -> {
+                // 앱 시작 시 또는 다른 이유로 서비스가 시작될 때
+                // 저장된 설정 값을 확인하여 포그라운드 여부 결정
+                if (settingsRepository.isBackgroundExecutionEnabled()) {
+                    startForeground(NOTIFICATION_ID, createNotification("서비스 실행 중..."))
+                    Log.i(TAG_SERVICE, "Service started, background execution is ENABLED.")
+                } else {
+                    Log.i(TAG_SERVICE, "Service started, background execution is DISABLED.")
+                    // 포그라운드로 시작하지 않음. 앱이 메모리에서 해제되면 서비스도 종료될 수 있음.
+                }
+            }
+        }
+
+        return START_STICKY // 서비스가 강제 종료되어도 시스템이 다시 시작하려고 시도
     }
 
     override fun onBind(intent: Intent): IBinder {
@@ -954,6 +989,8 @@ class CommunicationService : LifecycleService() {
 
     // --- Notification ---
     private fun updateNotificationCombined() {
+        if (!settingsRepository.isBackgroundExecutionEnabled()) return
+
         val bleStatus = _bleUiState.value.connectedDeviceName ?: "끊김"
         val tcpStatusText = _tcpUiState.value.connectionStatus.replace("TCP/IP: ", "") // "TCP/IP: " 부분 제거
         val wdUiState = _wifiDirectUiState.value
@@ -980,7 +1017,11 @@ class CommunicationService : LifecycleService() {
     private fun createNotification(contentText: String): Notification {
         val notificationIntent = Intent(this, MainActivity::class.java)
         // PendingIntent 플래그 설정 (Android 12 이상에서는 FLAG_IMMUTABLE 또는 FLAG_MUTABLE 명시 필요)
-        val pendingIntentFlags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        val pendingIntentFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
 
         val pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, pendingIntentFlags)
 
