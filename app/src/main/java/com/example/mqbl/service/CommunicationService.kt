@@ -80,6 +80,9 @@ private const val MAX_WIFI_DIRECT_LOG_SIZE = 20
 private const val NOTIFICATION_CHANNEL_ID = "MQBL_Communication_Channel"
 private const val NOTIFICATION_ID = 1
 private const val SOCKET_TIMEOUT = 5000 // 소켓 연결 타임아웃 (ms)
+private const val ALERT_NOTIFICATION_CHANNEL_ID = "MQBL_Alert_Channel" // 긴급 알림용 채널 ID
+private const val ALERT_NOTIFICATION_ID = 2 // 긴급 알림용 ID (기존 알림 ID와 달라야 함)
+
 // -----------------
 
 class CommunicationService : LifecycleService() {
@@ -569,6 +572,7 @@ class CommunicationService : LifecycleService() {
         }
         if (eventDescription != null) {
             addDetectionEvent(eventDescription)
+            sendAlertNotification(eventDescription)
         }
     }
 
@@ -945,7 +949,10 @@ class CommunicationService : LifecycleService() {
                     "horn" -> eventDescription = "경적 감지됨 (TCP)"
                     "boom" -> eventDescription = "폭발음 감지됨 (TCP)"
                 }
-                if (eventDescription != null) { addDetectionEvent(eventDescription) }
+                if (eventDescription != null) {
+                    addDetectionEvent(eventDescription)
+                    sendAlertNotification(eventDescription)
+                }
 
                 if (connectedThread != null && _bleUiState.value.connectedDeviceName != null) {
                     Log.d(TAG_BLE, "Service forwarding TCP message to BLE device.")
@@ -1001,16 +1008,27 @@ class CommunicationService : LifecycleService() {
     }
 
     private fun createNotificationChannel() {
-            val name = "MQBL 통신 서비스"
-            val descriptionText = "백그라운드 BLE, TCP/IP, Wi-Fi Direct 연결 상태 알림" // 설명에 Wi-Fi Direct 추가
-            val importance = NotificationManager.IMPORTANCE_LOW // 중요도를 낮춰 사용자 방해 최소화
-            val channel = NotificationChannel(NOTIFICATION_CHANNEL_ID, name, importance).apply {
-                description = descriptionText
-            }
-            val notificationManager: NotificationManager =
-                getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager.createNotificationChannel(channel)
-            Log.d(TAG_SERVICE, "Notification channel created.")
+        val name = "MQBL 통신 서비스"
+        val descriptionText = "백그라운드 BLE, TCP/IP, Wi-Fi Direct 연결 상태 알림" // 설명에 Wi-Fi Direct 추가
+        val importance = NotificationManager.IMPORTANCE_LOW // 중요도를 낮춰 사용자 방해 최소화
+        val channel = NotificationChannel(NOTIFICATION_CHANNEL_ID, name, importance).apply {
+            description = descriptionText
+        }
+        // --- 긴급 알림용 채널 추가 ---
+        val alertChannelName = "MQBL 위험 감지 알림"
+        val alertChannelDescription = "위험 상황(사이렌, 경적 등) 감지 시 알림"
+        val alertImportance = NotificationManager.IMPORTANCE_HIGH // 중요도를 HIGH로 설정
+        val alertChannel = NotificationChannel(ALERT_NOTIFICATION_CHANNEL_ID, alertChannelName, alertImportance).apply {
+            description = alertChannelDescription
+            // 필요시 진동 및 라이트 설정 추가 가능
+            // enableVibration(true)
+            // lightColor = Color.RED
+        }
+        val notificationManager: NotificationManager =
+            getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.createNotificationChannel(channel)
+        notificationManager.createNotificationChannel(alertChannel) // 추가된 채널
+        Log.d(TAG_SERVICE, "Notification channel created.")
 
     }
 
@@ -1336,21 +1354,41 @@ class CommunicationService : LifecycleService() {
 
 
         override fun run() {
-            Log.d(TAG_WIFI_DIRECT, "WifiDirectDataTransferThread started. IsGO: ${p2pInfo.isGroupOwner}")
+            Log.d(
+                TAG_WIFI_DIRECT,
+                "WifiDirectDataTransferThread started. IsGO: ${p2pInfo.isGroupOwner}"
+            )
             try {
                 if (p2pInfo.isGroupOwner) {
                     serverSocket = ServerSocket(WIFI_DIRECT_SERVER_PORT)
-                    Log.d(TAG_WIFI_DIRECT, "GO: ServerSocket opened on port $WIFI_DIRECT_SERVER_PORT. Waiting for client...")
+                    Log.d(
+                        TAG_WIFI_DIRECT,
+                        "GO: ServerSocket opened on port $WIFI_DIRECT_SERVER_PORT. Waiting for client..."
+                    )
                     _wifiDirectUiState.update { it.copy(statusText = "Wi-Fi Direct: 클라이언트 연결 대기 중...") }
                     clientSocket = serverSocket!!.accept() // 블로킹 호출
-                    Log.i(TAG_WIFI_DIRECT, "GO: Client connected: ${clientSocket?.inetAddress?.hostAddress}")
-                    _wifiDirectUiState.update { it.copy(statusText = "Wi-Fi Direct: 클라이언트 연결됨", connectedDeviceName = "클라이언트 (${clientSocket?.inetAddress?.hostAddress})") }
+                    Log.i(
+                        TAG_WIFI_DIRECT,
+                        "GO: Client connected: ${clientSocket?.inetAddress?.hostAddress}"
+                    )
+                    _wifiDirectUiState.update {
+                        it.copy(
+                            statusText = "Wi-Fi Direct: 클라이언트 연결됨",
+                            connectedDeviceName = "클라이언트 (${clientSocket?.inetAddress?.hostAddress})"
+                        )
+                    }
                 } else { // 클라이언트
                     clientSocket = Socket()
                     val hostAddress = p2pInfo.groupOwnerAddress.hostAddress
-                    Log.d(TAG_WIFI_DIRECT, "Client: Connecting to GO at $hostAddress:$WIFI_DIRECT_SERVER_PORT...")
+                    Log.d(
+                        TAG_WIFI_DIRECT,
+                        "Client: Connecting to GO at $hostAddress:$WIFI_DIRECT_SERVER_PORT..."
+                    )
                     _wifiDirectUiState.update { it.copy(statusText = "Wi-Fi Direct: 그룹 소유자에게 연결 중...") }
-                    clientSocket!!.connect(InetSocketAddress(hostAddress, WIFI_DIRECT_SERVER_PORT), SOCKET_TIMEOUT)
+                    clientSocket!!.connect(
+                        InetSocketAddress(hostAddress, WIFI_DIRECT_SERVER_PORT),
+                        SOCKET_TIMEOUT
+                    )
                     Log.i(TAG_WIFI_DIRECT, "Client: Connected to GO.")
                     _wifiDirectUiState.update { it.copy(statusText = "Wi-Fi Direct: 그룹 소유자에게 연결됨") }
                 }
@@ -1369,12 +1407,18 @@ class CommunicationService : LifecycleService() {
                             addWifiDirectLog("<- $line (Wi-Fi Direct)")
                             threadScope.launch { CommunicationHub.emitWifiDirectToTcp(line) }
                         } else {
-                            Log.w(TAG_WIFI_DIRECT, "DataTransferThread: readLine returned null. Peer likely closed connection.")
+                            Log.w(
+                                TAG_WIFI_DIRECT,
+                                "DataTransferThread: readLine returned null. Peer likely closed connection."
+                            )
                             break // 상대방이 연결을 닫음
                         }
                     } catch (e: IOException) {
                         if (currentThread().isInterrupted || clientSocket?.isClosed == true || clientSocket?.isConnected == false) {
-                            Log.d(TAG_WIFI_DIRECT, "DataTransferThread: Socket closed or thread interrupted during read. ${e.message}")
+                            Log.d(
+                                TAG_WIFI_DIRECT,
+                                "DataTransferThread: Socket closed or thread interrupted during read. ${e.message}"
+                            )
                         } else {
                             Log.e(TAG_WIFI_DIRECT, "DataTransferThread: IOException during read", e)
                         }
@@ -1382,7 +1426,11 @@ class CommunicationService : LifecycleService() {
                     }
                 }
             } catch (e: IOException) {
-                Log.e(TAG_WIFI_DIRECT, "DataTransferThread: IOException during socket setup or accept", e)
+                Log.e(
+                    TAG_WIFI_DIRECT,
+                    "DataTransferThread: IOException during socket setup or accept",
+                    e
+                )
                 _wifiDirectUiState.update { it.copy(errorMessage = "Wi-Fi Direct 통신 오류: ${e.message}") }
             } catch (e: Exception) { // 예상치 못한 다른 예외 처리
                 Log.e(TAG_WIFI_DIRECT, "DataTransferThread: Unexpected exception", e)
@@ -1409,7 +1457,10 @@ class CommunicationService : LifecycleService() {
                     }
                 }
             } else {
-                Log.w(TAG_WIFI_DIRECT, "DataTransferThread: Cannot write, outputStream is null or socket not connected/output shutdown.")
+                Log.w(
+                    TAG_WIFI_DIRECT,
+                    "DataTransferThread: Cannot write, outputStream is null or socket not connected/output shutdown."
+                )
                 _wifiDirectUiState.update { it.copy(errorMessage = "Wi-Fi Direct 메시지 전송 불가: 연결되지 않음") }
             }
         }
@@ -1425,10 +1476,26 @@ class CommunicationService : LifecycleService() {
         private fun cancelInternals() {
             Log.d(TAG_WIFI_DIRECT, "DataTransferThread cancelInternals called.")
             threadScope.cancel() // 코루틴 스코프 취소
-            try { inputStream?.close() } catch (e: IOException) { Log.e(TAG_WIFI_DIRECT, "Error closing WD input stream", e) }
-            try { outputStream?.close() } catch (e: IOException) { Log.e(TAG_WIFI_DIRECT, "Error closing WD output stream", e) }
-            try { clientSocket?.close() } catch (e: IOException) { Log.e(TAG_WIFI_DIRECT, "Error closing WD client socket", e) }
-            try { serverSocket?.close() } catch (e: IOException) { Log.e(TAG_WIFI_DIRECT, "Error closing WD server socket", e) }
+            try {
+                inputStream?.close()
+            } catch (e: IOException) {
+                Log.e(TAG_WIFI_DIRECT, "Error closing WD input stream", e)
+            }
+            try {
+                outputStream?.close()
+            } catch (e: IOException) {
+                Log.e(TAG_WIFI_DIRECT, "Error closing WD output stream", e)
+            }
+            try {
+                clientSocket?.close()
+            } catch (e: IOException) {
+                Log.e(TAG_WIFI_DIRECT, "Error closing WD client socket", e)
+            }
+            try {
+                serverSocket?.close()
+            } catch (e: IOException) {
+                Log.e(TAG_WIFI_DIRECT, "Error closing WD server socket", e)
+            }
             inputStream = null
             outputStream = null
             clientSocket = null
@@ -1460,5 +1527,28 @@ class CommunicationService : LifecycleService() {
             }
             Log.d(TAG_WIFI_DIRECT, "DataTransferThread resources cleaned up.")
         }
+    }
+    private fun sendAlertNotification(contentText: String) {
+        val notificationIntent = Intent(this, MainActivity::class.java)
+        val pendingIntentFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
+        val pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, pendingIntentFlags)
+
+        val notification = NotificationCompat.Builder(this, ALERT_NOTIFICATION_CHANNEL_ID) // 긴급 알림 채널 ID 사용
+            .setContentTitle("위험 감지!") // 알림 제목
+            .setContentText(contentText) // 알림 내용
+            .setSmallIcon(R.mipmap.ic_launcher) //
+            .setContentIntent(pendingIntent)    // 알림 클릭 시 MainActivity 실행
+            .setPriority(NotificationCompat.PRIORITY_HIGH) // 높은 우선순위 (헤드업 알림)
+            .setAutoCancel(true) // 사용자가 탭하면 알림 자동 삭제
+            .build()
+
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        // NOTIFICATION_ID가 아닌 ALERT_NOTIFICATION_ID 사용
+        notificationManager.notify(ALERT_NOTIFICATION_ID, notification)
+        Log.i(TAG_SERVICE, "Alert notification sent: $contentText")
     }
 }

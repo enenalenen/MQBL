@@ -49,6 +49,19 @@ import com.example.mqbl.ui.theme.MQBLTheme
 import com.example.mqbl.ui.wifidirect.WifiDirectViewModel
 import kotlinx.coroutines.flow.collectLatest
 
+import android.net.Uri // Uri import 추가
+import android.provider.Settings // Settings import 추가
+import androidx.activity.compose.rememberLauncherForActivityResult // 추가
+import androidx.activity.result.contract.ActivityResultContracts.RequestPermission // 추가
+import androidx.compose.material3.AlertDialog // AlertDialog import 추가
+import androidx.compose.material3.Button // Button import 추가
+import androidx.compose.runtime.mutableStateOf // mutableStateOf import 추가
+import androidx.compose.runtime.remember // remember import 추가
+import androidx.compose.runtime.setValue // setValue import 추가
+import androidx.core.content.ContextCompat // ContextCompat import 추가
+import android.content.pm.PackageManager // PackageManager import 추가
+import androidx.compose.ui.platform.LocalContext // LocalContext import 추가
+
 
 class MainActivity : ComponentActivity() {
 
@@ -98,6 +111,61 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
     val navController = rememberNavController()
+
+    val context = LocalContext.current
+    var showNotificationPermissionDialog by remember { mutableStateOf(false) }
+
+    // 안드로이드 13 (TIRAMISU) 이상에서만 알림 권한 요청 로직 실행
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        // 알림 권한 상태를 확인하는 런처
+        val notificationPermissionLauncher = rememberLauncherForActivityResult(
+            contract = RequestPermission(),
+            onResult = { isGranted ->
+                if (!isGranted) {
+                    // 사용자가 권한을 거부한 경우, 설정으로 유도하는 다이얼로그를 띄움
+                    showNotificationPermissionDialog = true
+                }
+            }
+        )
+
+        // 화면이 처음 그려질 때 알림 권한 확인
+        LaunchedEffect(Unit) {
+            val permissionStatus = ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
+            if (permissionStatus == PackageManager.PERMISSION_DENIED) {
+                // 권한이 없다면 시스템 권한 요청 팝업을 띄움
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+
+        // 권한이 최종적으로 거부되어 설정으로 유도해야 할 때 다이얼로그 표시
+        if (showNotificationPermissionDialog) {
+            AlertDialog(
+                onDismissRequest = { showNotificationPermissionDialog = false },
+                title = { Text("알림 권한 필요") },
+                text = { Text("위험 상황(사이렌, 경적 등)을 즉시 알려면 알림 권한이 반드시 필요합니다. 설정에서 권한을 허용해주세요.") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            // 앱의 상세 설정 화면으로 이동하는 인텐트(Intent) 생성
+                            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                            val uri = Uri.fromParts("package", context.packageName, null)
+                            intent.data = uri
+                            // 설정 화면으로 이동
+                            context.startActivity(intent)
+                            showNotificationPermissionDialog = false
+                        }
+                    ) {
+                        Text("설정으로 이동")
+                    }
+                },
+                dismissButton = {
+                    Button(onClick = { showNotificationPermissionDialog = false }) {
+                        Text("닫기")
+                    }
+                }
+            )
+        }
+    }
 
     Scaffold(
         bottomBar = {
