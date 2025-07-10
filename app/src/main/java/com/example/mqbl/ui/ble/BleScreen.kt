@@ -25,7 +25,8 @@ data class BleUiState(
     val connectedDeviceName: String? = null,
     val isBluetoothSupported: Boolean = true,
     val isConnecting: Boolean = false,
-    val connectError: String? = null
+    val connectError: String? = null,
+    val isScanning: Boolean = false
 )
 
 data class DetectionEvent(

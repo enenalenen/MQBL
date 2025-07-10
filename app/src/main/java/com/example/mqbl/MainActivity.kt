@@ -237,6 +237,8 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
                 val bleViewModel: BleViewModel = viewModel()
                 val bleUiState by bleViewModel.uiState.collectAsStateWithLifecycle()
                 val bondedDevices by bleViewModel.bondedDevices.collectAsStateWithLifecycle()
+                val scannedDevices by bleViewModel.scannedDevices.collectAsStateWithLifecycle() // <-- 스캔된 기기 목록 가져오기
+
 
                 val tcpViewModel: TcpViewModel = viewModel()
                 val tcpUiState by tcpViewModel.tcpUiState.collectAsStateWithLifecycle()
@@ -305,6 +307,10 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
                     onRequestBlePermissions = bleViewModel::checkOrRequestPermissions,
                     onBleDisconnect = bleViewModel::disconnect,
                     onSendVibrationValue = bleViewModel::sendValue,
+                    scannedDevices = scannedDevices,
+                    onStartScan = bleViewModel::startScan,
+                    onStopScan = bleViewModel::stopScan,
+                    onPairDevice = bleViewModel::pairWithDevice,
                     // TCP
                     tcpUiState = tcpUiState,
                     currentServerIp = currentServerIp,

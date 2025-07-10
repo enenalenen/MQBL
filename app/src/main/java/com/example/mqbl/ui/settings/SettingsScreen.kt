@@ -42,6 +42,10 @@ fun SettingsScreen(
     onRequestBlePermissions: () -> Unit,
     onBleDisconnect: () -> Unit,
     onSendVibrationValue: (Int) -> Unit,
+    scannedDevices: List<BluetoothDevice>,
+    onStartScan: () -> Unit,
+    onStopScan: () -> Unit,
+    onPairDevice: (BluetoothDevice) -> Unit,
 
     // TCP/IP
     tcpUiState: TcpUiState,
@@ -185,6 +189,57 @@ fun SettingsScreen(
             }
         }
         // --- BLE 연결 설정 섹션 끝 ---
+
+        // --- 주변 기기 검색 섹션 ---
+        item {
+            Card(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("주변 기기 검색 (BLE)", style = MaterialTheme.typography.titleMedium)
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    if (bleUiState.isScanning) {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+
+                    Button(
+                        onClick = { if (bleUiState.isScanning) onStopScan() else onStartScan() },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(if (bleUiState.isScanning) "검색 중지" else "주변 기기 검색 시작")
+                    }
+
+                    if (scannedDevices.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("검색된 기기:", style = MaterialTheme.typography.titleSmall)
+                        // LazyColumn을 직접 중첩하는 대신 Column과 forEach 사용
+                        Column(modifier = Modifier.heightIn(max = 200.dp)) {
+                            scannedDevices.forEach { device ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        val deviceName = try { device.name ?: "이름 없음" } catch (e: SecurityException) { "권한 오류" }
+                                        Text(deviceName, fontWeight = FontWeight.Bold)
+                                        Text(device.address, fontSize = 12.sp)
+                                    }
+                                    Button(onClick = { onPairDevice(device) }) {
+                                        Text("페어링")
+                                    }
+                                }
+                            }
+                        }
+                    } else if (!bleUiState.isScanning) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("검색된 기기가 없습니다.", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
+        // --- 주변 기기 검색 섹션 끝 ---
 
         // --- TCP/IP 연결 설정 섹션 ---
         item {
@@ -348,10 +403,23 @@ fun SettingsScreenPreview() {
             onBackgroundExecutionToggled = {},
             bleUiState = BleUiState(status = "BLE 상태: 연결됨", connectedDeviceName = "미리보기 BLE 장치"),
             bondedDevices = emptyList(),
-            onDeviceSelected = {}, onRequestBlePermissions = {}, onBleDisconnect = {}, onSendVibrationValue = {},
+            onDeviceSelected = {},
+            onRequestBlePermissions = {},
+            onBleDisconnect = {},
+            onSendVibrationValue = {},
+            // --- ▼▼▼ 수정된 부분 ▼▼▼ ---
+            scannedDevices = emptyList(),
+            onStartScan = {},
+            onStopScan = {},
+            onPairDevice = {},
+            // --- ▲▲▲ 수정된 부분 ▲▲▲ ---
             tcpUiState = TcpUiState(connectionStatus = "TCP/IP 상태: 미리보기", isConnected = true),
-            currentServerIp = "192.168.0.100", currentServerPort = "12345",
-            onServerIpChange = {}, onServerPortChange = {}, onTcpConnect = {}, onTcpDisconnect = {},
+            currentServerIp = "192.168.0.100",
+            currentServerPort = "12345",
+            onServerIpChange = {},
+            onServerPortChange = {},
+            onTcpConnect = {},
+            onTcpDisconnect = {},
             wifiDirectUiState = WifiDirectUiState(
                 isWifiDirectEnabled = true,
                 statusText = "Wi-Fi Direct: 미리보기 연결됨",
@@ -369,8 +437,11 @@ fun SettingsScreenPreview() {
                 },
                 receivedDataLog = listOf("<- Hello from peer!", "-> Hi there!")
             ),
-            onRequestWifiDirectPermissions = {}, onDiscoverWifiDirectPeers = {},
-            onConnectToWifiDirectPeer = {}, onDisconnectWifiDirect = {}, onSendWifiDirectMessage = {}
+            onRequestWifiDirectPermissions = {},
+            onDiscoverWifiDirectPeers = {},
+            onConnectToWifiDirectPeer = {},
+            onDisconnectWifiDirect = {},
+            onSendWifiDirectMessage = {}
         )
     }
 }

@@ -51,6 +51,16 @@ class BleViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // --- 스캔된 기기 목록을 위한 StateFlow 추가 ---
+    private val defaultScannedDeviceList = emptyList<BluetoothDevice>()
+    val scannedDevices: StateFlow<List<BluetoothDevice>> = _binder.flatMapLatest { binder ->
+        binder?.getScannedDevicesFlow() ?: flowOf(defaultScannedDeviceList)
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000L),
+        initialValue = defaultScannedDeviceList
+    )
+
     // --- UI에 노출할 상태 (Service의 StateFlow로부터 파생) ---
 
     // 서비스가 연결되지 않았을 때 표시할 기본 상태 값
@@ -116,6 +126,21 @@ class BleViewModel(application: Application) : AndroidViewModel(application) {
             Log.d(TAG, "Permissions check OK. Requesting service state refresh.")
             _binder.value?.getService()?.refreshBleState()
         }
+    }
+
+    fun startScan() {
+        Log.i(TAG, "UI Action: Request start BLE scan")
+        _binder.value?.getService()?.startBleScan()
+    }
+
+    fun stopScan() {
+        Log.i(TAG, "UI Action: Request stop BLE scan")
+        _binder.value?.getService()?.stopBleScan()
+    }
+
+    fun pairWithDevice(device: BluetoothDevice) {
+        Log.i(TAG, "UI Action: Request pair with ${device.address}")
+        _binder.value?.getService()?.pairDevice(device)
     }
 
     /** Service에 BLE 기기 연결 요청 */
