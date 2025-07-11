@@ -2,14 +2,20 @@ package com.example.mqbl
 
 import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.util.Log
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -22,8 +28,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -43,24 +54,10 @@ import com.example.mqbl.ui.ble.BleScreen
 import com.example.mqbl.ui.ble.BleViewModel
 import com.example.mqbl.ui.settings.SettingsScreen
 import com.example.mqbl.ui.settings.SettingsViewModel
-import com.example.mqbl.ui.tcp.TcpScreen
 import com.example.mqbl.ui.tcp.TcpViewModel
 import com.example.mqbl.ui.theme.MQBLTheme
 import com.example.mqbl.ui.wifidirect.WifiDirectViewModel
 import kotlinx.coroutines.flow.collectLatest
-
-import android.net.Uri // Uri import 추가
-import android.provider.Settings // Settings import 추가
-import androidx.activity.compose.rememberLauncherForActivityResult // 추가
-import androidx.activity.result.contract.ActivityResultContracts.RequestPermission // 추가
-import androidx.compose.material3.AlertDialog // AlertDialog import 추가
-import androidx.compose.material3.Button // Button import 추가
-import androidx.compose.runtime.mutableStateOf // mutableStateOf import 추가
-import androidx.compose.runtime.remember // remember import 추가
-import androidx.compose.runtime.setValue // setValue import 추가
-import androidx.core.content.ContextCompat // ContextCompat import 추가
-import android.content.pm.PackageManager // PackageManager import 추가
-import androidx.compose.ui.platform.LocalContext // LocalContext import 추가
 
 
 class MainActivity : ComponentActivity() {
@@ -68,7 +65,6 @@ class MainActivity : ComponentActivity() {
     private val requestMultiplePermissionsLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
             Log.d("MainActivity", "Permission Result Received: $permissions")
-            // 권한 요청 결과는 각 ViewModel 또는 화면의 onResume에서 다시 확인하여 처리
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -76,11 +72,7 @@ class MainActivity : ComponentActivity() {
 
         WindowCompat.setDecorFitsSystemWindows(window, true)
 
-        // --- 수정: 서비스 시작 로직 변경 ---
-        // 이제 서비스는 설정 값에 따라 스스로 포그라운드 여부를 결정하므로,
-        // 여기서는 단순히 서비스를 시작하기만 하면 됩니다.
         startCommunicationService()
-        // --- 수정 끝 ---
 
         setContent {
             MQBLTheme {
@@ -100,8 +92,6 @@ class MainActivity : ComponentActivity() {
 
     private fun startCommunicationService() {
         val serviceIntent = Intent(this, CommunicationService::class.java)
-        // startForegroundService 대신 startService 사용.
-        // 서비스 내부에서 설정에 따라 포그라운드로 전환할지 결정함.
         startService(serviceIntent)
         Log.i("MainActivity", "CommunicationService started.")
     }
@@ -115,29 +105,23 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
     val context = LocalContext.current
     var showNotificationPermissionDialog by remember { mutableStateOf(false) }
 
-    // 안드로이드 13 (TIRAMISU) 이상에서만 알림 권한 요청 로직 실행
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        // 알림 권한 상태를 확인하는 런처
         val notificationPermissionLauncher = rememberLauncherForActivityResult(
-            contract = RequestPermission(),
+            contract = ActivityResultContracts.RequestPermission(),
             onResult = { isGranted ->
                 if (!isGranted) {
-                    // 사용자가 권한을 거부한 경우, 설정으로 유도하는 다이얼로그를 띄움
                     showNotificationPermissionDialog = true
                 }
             }
         )
 
-        // 화면이 처음 그려질 때 알림 권한 확인
         LaunchedEffect(Unit) {
             val permissionStatus = ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
             if (permissionStatus == PackageManager.PERMISSION_DENIED) {
-                // 권한이 없다면 시스템 권한 요청 팝업을 띄움
                 notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
 
-        // 권한이 최종적으로 거부되어 설정으로 유도해야 할 때 다이얼로그 표시
         if (showNotificationPermissionDialog) {
             AlertDialog(
                 onDismissRequest = { showNotificationPermissionDialog = false },
@@ -146,11 +130,9 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
                 confirmButton = {
                     Button(
                         onClick = {
-                            // 앱의 상세 설정 화면으로 이동하는 인텐트(Intent) 생성
                             val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
                             val uri = Uri.fromParts("package", context.packageName, null)
                             intent.data = uri
-                            // 설정 화면으로 이동
                             context.startActivity(intent)
                             showNotificationPermissionDialog = false
                         }
@@ -204,41 +186,21 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
                     uiState = uiState,
                     bondedDevices = bondedDevices,
                     detectionLog = detectionLog,
-                    onDeviceSelected = { /* SettingsScreen에서 처리 */ },
-                    onSendValue = { /* SettingsScreen으로 이동 */ },
-                    onRequestPermissions = { /* SettingsScreen에서 처리 */ },
-                    onDisconnect = { /* SettingsScreen에서 처리 */ }
+                    onDeviceSelected = { },
+                    onSendValue = { },
+                    onRequestPermissions = { },
+                    onDisconnect = { }
                 )
             }
-            composable(Screen.Tcp.route) { // TCP 탭
-                val tcpViewModel: TcpViewModel = viewModel()
-                val tcpUiState by tcpViewModel.tcpUiState.collectAsStateWithLifecycle()
-                val receivedTcpMessages by tcpViewModel.receivedTcpMessages.collectAsStateWithLifecycle()
-                val currentServerIp by tcpViewModel.serverIp.collectAsStateWithLifecycle()
-                val currentServerPort by tcpViewModel.serverPort.collectAsStateWithLifecycle()
 
-                TcpScreen(
-                    uiState = tcpUiState,
-                    receivedMessages = receivedTcpMessages,
-                    currentServerIp = currentServerIp,
-                    currentServerPort = currentServerPort,
-                    onServerIpChange = tcpViewModel::updateServerIp,
-                    onServerPortChange = tcpViewModel::updateServerPort,
-                    onConnect = { /* SettingsScreen에서 처리 */ },
-                    onDisconnect = { /* SettingsScreen에서 처리 */ },
-                    onSendMessage = tcpViewModel::sendMessage
-                )
-            }
             composable(Screen.Settings.route) {
-                // --- 수정: SettingsViewModel 추가 및 연결 ---
                 val settingsViewModel: SettingsViewModel = viewModel()
                 val settingsUiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
 
                 val bleViewModel: BleViewModel = viewModel()
                 val bleUiState by bleViewModel.uiState.collectAsStateWithLifecycle()
                 val bondedDevices by bleViewModel.bondedDevices.collectAsStateWithLifecycle()
-                val scannedDevices by bleViewModel.scannedDevices.collectAsStateWithLifecycle() // <-- 스캔된 기기 목록 가져오기
-
+                val scannedDevices by bleViewModel.scannedDevices.collectAsStateWithLifecycle()
 
                 val tcpViewModel: TcpViewModel = viewModel()
                 val tcpUiState by tcpViewModel.tcpUiState.collectAsStateWithLifecycle()
@@ -247,10 +209,8 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
 
                 val wifiDirectViewModel: WifiDirectViewModel = viewModel()
                 val wifiDirectUiState by wifiDirectViewModel.wifiDirectUiState.collectAsStateWithLifecycle()
-                // --- 수정 끝 ---
 
 
-                // BLE 권한 요청 이벤트 리스너
                 LaunchedEffect(key1 = bleViewModel) {
                     bleViewModel.permissionRequestEvent.collectLatest {
                         Log.d("SettingsScreen", "BLE Permission request event received, launching dialog.")
@@ -303,11 +263,11 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
                     // BLE
                     bleUiState = bleUiState,
                     bondedDevices = bondedDevices,
+                    scannedDevices = scannedDevices,
                     onDeviceSelected = bleViewModel::connectToDevice,
                     onRequestBlePermissions = bleViewModel::checkOrRequestPermissions,
                     onBleDisconnect = bleViewModel::disconnect,
                     onSendVibrationValue = bleViewModel::sendValue,
-                    scannedDevices = scannedDevices,
                     onStartScan = bleViewModel::startScan,
                     onStopScan = bleViewModel::stopScan,
                     onPairDevice = bleViewModel::pairWithDevice,

@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.mqbl.R // R 클래스 import
 import com.example.mqbl.ui.ble.BleUiState
+import com.example.mqbl.ui.tcp.TcpMessageItem
 import com.example.mqbl.ui.tcp.TcpUiState
 import com.example.mqbl.ui.wifidirect.WifiDirectPeerItem
 import com.example.mqbl.ui.wifidirect.WifiDirectUiState
@@ -38,11 +39,11 @@ fun SettingsScreen(
     // BLE
     bleUiState: BleUiState,
     bondedDevices: List<BluetoothDevice>,
+    scannedDevices: List<BluetoothDevice>,
     onDeviceSelected: (BluetoothDevice) -> Unit,
     onRequestBlePermissions: () -> Unit,
     onBleDisconnect: () -> Unit,
     onSendVibrationValue: (Int) -> Unit,
-    scannedDevices: List<BluetoothDevice>,
     onStartScan: () -> Unit,
     onStopScan: () -> Unit,
     onPairDevice: (BluetoothDevice) -> Unit,
@@ -211,7 +212,6 @@ fun SettingsScreen(
                     if (scannedDevices.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(16.dp))
                         Text("검색된 기기:", style = MaterialTheme.typography.titleSmall)
-                        // LazyColumn을 직접 중첩하는 대신 Column과 forEach 사용
                         Column(modifier = Modifier.heightIn(max = 200.dp)) {
                             scannedDevices.forEach { device ->
                                 Row(
@@ -260,6 +260,7 @@ fun SettingsScreen(
                         Button(onClick = onTcpConnect, enabled = !tcpUiState.isConnected && !tcpUiState.connectionStatus.contains("연결 중")) { Text("TCP 연결") }
                         Button(onClick = onTcpDisconnect, enabled = tcpUiState.isConnected || tcpUiState.connectionStatus.contains("연결 중")) { Text("TCP 연결 해제") }
                     }
+                    // --- 메시지 전송 및 로그 UI 제거됨 ---
                 }
             }
         }
@@ -310,11 +311,10 @@ fun SettingsScreen(
                         }
                     }
 
-                    // 검색된 피어 목록
                     if (wifiDirectUiState.peers.isNotEmpty() && wifiDirectUiState.connectedDeviceName == null && !wifiDirectUiState.isConnecting) {
                         Spacer(modifier = Modifier.height(16.dp))
                         Text("검색된 기기:", style = MaterialTheme.typography.titleSmall)
-                        Column(modifier = Modifier.heightIn(max = 200.dp)) { // 스크롤 가능한 최대 높이
+                        Column(modifier = Modifier.heightIn(max = 200.dp)) {
                             wifiDirectUiState.peers.forEach { peer ->
                                 Card(
                                     modifier = Modifier
@@ -341,7 +341,6 @@ fun SettingsScreen(
                         }
                     }
 
-                    // 연결된 경우 정보 표시
                     if (wifiDirectUiState.connectedDeviceName != null && wifiDirectUiState.connectionInfo?.groupFormed == true) {
                         Spacer(modifier = Modifier.height(16.dp))
                         Text("연결 정보:", style = MaterialTheme.typography.titleSmall)
@@ -349,7 +348,6 @@ fun SettingsScreen(
                         Text(if (wifiDirectUiState.isGroupOwner) "역할: 그룹 소유자 (서버)" else "역할: 클라이언트")
                         wifiDirectUiState.groupOwnerAddress?.let { Text("그룹 소유자 주소: $it") }
 
-                        // 메시지 전송 UI
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(stringResource(R.string.send_wifi_direct_message), style = MaterialTheme.typography.titleSmall)
                         Spacer(modifier = Modifier.height(8.dp))
@@ -358,19 +356,18 @@ fun SettingsScreen(
                             onValueChange = { wifiDirectMessageToSend = it },
                             label = { Text(stringResource(R.string.message_to_send_wifi_direct)) },
                             modifier = Modifier.fillMaxWidth(),
-                            enabled = true // 연결되어 있으면 항상 활성화
+                            enabled = true
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Button(
                             onClick = { onSendWifiDirectMessage(wifiDirectMessageToSend) },
                             modifier = Modifier.align(Alignment.End),
-                            enabled = true // 연결되어 있으면 항상 활성화
+                            enabled = true
                         ) {
                             Text("WD 전송")
                         }
                     }
 
-                    // Wi-Fi Direct 수신/송신 로그
                     if (wifiDirectUiState.receivedDataLog.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(stringResource(R.string.wifi_direct_logs_title), style = MaterialTheme.typography.titleSmall)
@@ -379,7 +376,7 @@ fun SettingsScreen(
                             shape = MaterialTheme.shapes.small,
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
                         ) {
-                            LazyColumn(modifier = Modifier.padding(8.dp), reverseLayout = true) { // 최근 메시지가 위로
+                            LazyColumn(modifier = Modifier.padding(8.dp), reverseLayout = true) {
                                 items(wifiDirectUiState.receivedDataLog) { log ->
                                     Text(log, fontSize = 12.sp, modifier = Modifier.padding(vertical = 2.dp))
                                 }
@@ -401,18 +398,16 @@ fun SettingsScreenPreview() {
         SettingsScreen(
             settingsUiState = SettingsUiState(isBackgroundExecutionEnabled = true),
             onBackgroundExecutionToggled = {},
-            bleUiState = BleUiState(status = "BLE 상태: 연결됨", connectedDeviceName = "미리보기 BLE 장치"),
+            bleUiState = BleUiState(status = "BLE 상태: 연결됨", connectedDeviceName = "미리보기 BLE 장치", isScanning = false),
             bondedDevices = emptyList(),
+            scannedDevices = emptyList(),
             onDeviceSelected = {},
             onRequestBlePermissions = {},
             onBleDisconnect = {},
             onSendVibrationValue = {},
-            // --- ▼▼▼ 수정된 부분 ▼▼▼ ---
-            scannedDevices = emptyList(),
             onStartScan = {},
             onStopScan = {},
             onPairDevice = {},
-            // --- ▲▲▲ 수정된 부분 ▲▲▲ ---
             tcpUiState = TcpUiState(connectionStatus = "TCP/IP 상태: 미리보기", isConnected = true),
             currentServerIp = "192.168.0.100",
             currentServerPort = "12345",
