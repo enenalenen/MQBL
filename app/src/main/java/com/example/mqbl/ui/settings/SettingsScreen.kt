@@ -23,7 +23,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.mqbl.R // R 클래스 import
 import com.example.mqbl.ui.ble.BleUiState
-import com.example.mqbl.ui.tcp.TcpMessageItem
 import com.example.mqbl.ui.tcp.TcpUiState
 import com.example.mqbl.ui.wifidirect.WifiDirectPeerItem
 import com.example.mqbl.ui.wifidirect.WifiDirectUiState
@@ -57,18 +56,20 @@ fun SettingsScreen(
     onTcpConnect: () -> Unit,
     onTcpDisconnect: () -> Unit,
 
-    // Wi-Fi Direct
+    // --- ▼▼▼ Wi-Fi Direct 파라미터 주석 처리 ▼▼▼ ---
+    /*
     wifiDirectUiState: WifiDirectUiState,
     onRequestWifiDirectPermissions: () -> Unit,
     onDiscoverWifiDirectPeers: () -> Unit,
     onConnectToWifiDirectPeer: (WifiP2pDevice) -> Unit,
     onDisconnectWifiDirect: () -> Unit,
     onSendWifiDirectMessage: (String) -> Unit
+    */
 ) {
     var isBleDropdownExpanded by remember { mutableStateOf(false) }
     var selectedBleDeviceDisplay by remember { mutableStateOf("페어링된 BLE 기기 선택") }
     var currentVibrationValue by remember { mutableIntStateOf(5) }
-    var wifiDirectMessageToSend by remember { mutableStateOf("Hello Wi-Fi Direct!") }
+    // var wifiDirectMessageToSend by remember { mutableStateOf("Hello Wi-Fi Direct!") } // 주석 처리
 
 
     LaunchedEffect(bleUiState.connectedDeviceName) {
@@ -260,14 +261,14 @@ fun SettingsScreen(
                         Button(onClick = onTcpConnect, enabled = !tcpUiState.isConnected && !tcpUiState.connectionStatus.contains("연결 중")) { Text("TCP 연결") }
                         Button(onClick = onTcpDisconnect, enabled = tcpUiState.isConnected || tcpUiState.connectionStatus.contains("연결 중")) { Text("TCP 연결 해제") }
                     }
-                    // --- 메시지 전송 및 로그 UI 제거됨 ---
                 }
             }
         }
         // --- TCP/IP 연결 설정 섹션 끝 ---
 
 
-        // --- Wi-Fi Direct 설정 섹션 ---
+        // --- ▼▼▼ Wi-Fi Direct 설정 섹션 전체 주석 처리 ▼▼▼ ---
+        /*
         item {
             Card(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
                 Column(modifier = Modifier.padding(16.dp)) {
@@ -386,7 +387,8 @@ fun SettingsScreen(
                 }
             }
         }
-        // --- Wi-Fi Direct 설정 섹션 끝 ---
+        */
+        // --- ▲▲▲ Wi-Fi Direct 설정 섹션 전체 주석 처리 끝 ▲▲▲ ---
     }
 }
 
@@ -415,6 +417,8 @@ fun SettingsScreenPreview() {
             onServerPortChange = {},
             onTcpConnect = {},
             onTcpDisconnect = {},
+            // --- ▼▼▼ Preview에서 Wi-Fi Direct 파라미터 주석 처리 ▼▼▼ ---
+            /*
             wifiDirectUiState = WifiDirectUiState(
                 isWifiDirectEnabled = true,
                 statusText = "Wi-Fi Direct: 미리보기 연결됨",
@@ -437,6 +441,7 @@ fun SettingsScreenPreview() {
             onConnectToWifiDirectPeer = {},
             onDisconnectWifiDirect = {},
             onSendWifiDirectMessage = {}
+            */
         )
     }
 }

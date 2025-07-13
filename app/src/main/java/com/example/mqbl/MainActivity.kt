@@ -207,8 +207,9 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
                 val currentServerIp by tcpViewModel.serverIp.collectAsStateWithLifecycle()
                 val currentServerPort by tcpViewModel.serverPort.collectAsStateWithLifecycle()
 
-                val wifiDirectViewModel: WifiDirectViewModel = viewModel()
-                val wifiDirectUiState by wifiDirectViewModel.wifiDirectUiState.collectAsStateWithLifecycle()
+                // --- ▼▼▼ Wi-Fi Direct ViewModel 및 관련 코드 주석 처리 ▼▼▼ ---
+                // val wifiDirectViewModel: WifiDirectViewModel = viewModel()
+                // val wifiDirectUiState by wifiDirectViewModel.wifiDirectUiState.collectAsStateWithLifecycle()
 
 
                 LaunchedEffect(key1 = bleViewModel) {
@@ -229,6 +230,7 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
                     }
                 }
 
+                /*
                 val requestWifiDirectPerms = {
                     Log.d("SettingsScreen", "Wi-Fi Direct Permission request initiated from UI.")
                     val wdPermissions = mutableListOf(
@@ -239,15 +241,16 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
                     }
                     requestPermissions(wdPermissions.toTypedArray())
                 }
+                */
 
 
                 val lifecycleOwner = LocalLifecycleOwner.current
-                DisposableEffect(lifecycleOwner, bleViewModel, wifiDirectViewModel) {
+                DisposableEffect(lifecycleOwner, bleViewModel) { // wifiDirectViewModel 제거
                     val observer = LifecycleEventObserver { _, event ->
                         if (event == Lifecycle.Event.ON_RESUME) {
                             Log.d("SettingsScreen", "ON_RESUME detected, re-checking permissions.")
                             bleViewModel.checkOrRequestPermissions()
-                            wifiDirectViewModel.discoverPeers()
+                            // wifiDirectViewModel.discoverPeers() // 주석 처리
                         }
                     }
                     lifecycleOwner.lifecycle.addObserver(observer)
@@ -279,13 +282,15 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
                     onServerPortChange = tcpViewModel::updateServerPort,
                     onTcpConnect = tcpViewModel::connect,
                     onTcpDisconnect = tcpViewModel::disconnect,
-                    // Wi-Fi Direct
+                    // Wi-Fi Direct 파라미터 전달 부분 주석 처리
+                    /*
                     wifiDirectUiState = wifiDirectUiState,
                     onRequestWifiDirectPermissions = requestWifiDirectPerms,
                     onDiscoverWifiDirectPeers = wifiDirectViewModel::discoverPeers,
                     onConnectToWifiDirectPeer = wifiDirectViewModel::connectToPeer,
                     onDisconnectWifiDirect = wifiDirectViewModel::disconnect,
                     onSendWifiDirectMessage = wifiDirectViewModel::sendWifiDirectMessage
+                    */
                 )
             }
         }
