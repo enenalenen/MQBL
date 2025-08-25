@@ -68,6 +68,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import com.example.mqbl.ui.ble.CustomSoundEvent
+import kotlinx.coroutines.flow.first
 
 // --- 상수 정의 ---
 private const val TAG_SERVICE = "CommService"
@@ -97,6 +99,7 @@ class CommunicationService : LifecycleService() {
 
     inner class LocalBinder : Binder() {
         fun getService(): CommunicationService = this@CommunicationService
+        fun getCustomSoundEventLogFlow(): StateFlow<List<CustomSoundEvent>> = _customSoundEventLog.asStateFlow()
         // BLE
         fun getBleUiStateFlow(): StateFlow<BleUiState> = _bleUiState.asStateFlow()
         fun getBondedDevicesFlow(): StateFlow<List<BluetoothDevice>> = _bondedDevices.asStateFlow()
@@ -111,6 +114,9 @@ class CommunicationService : LifecycleService() {
     private val binder = LocalBinder()
 
     private lateinit var settingsRepository: SettingsRepository
+
+    private val _customSoundEventLog = MutableStateFlow<List<CustomSoundEvent>>(emptyList())
+    private var customKeywords = listOf<String>()
 
     // BLE
     private lateinit var bluetoothManager: BluetoothManager
@@ -211,6 +217,24 @@ class CommunicationService : LifecycleService() {
         super.onCreate()
         Log.i(TAG_SERVICE, "Service onCreate")
         settingsRepository = SettingsRepository(this)
+
+        lifecycleScope.launch {
+            // 초기 값 로드
+            customKeywords = settingsRepository.customKeywordsFlow.first()
+                .split(",")
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+            Log.d(TAG_SERVICE, "Initial custom keywords loaded: $customKeywords")
+
+            // 변경 사항 구독
+            settingsRepository.customKeywordsFlow.collect { keywordsString ->
+                customKeywords = keywordsString.split(",")
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+                Log.d(TAG_SERVICE, "Custom keywords updated: $customKeywords")
+            }
+        }
+
         createNotificationChannel()
         initializeBle()
         //initializeWifiDirect()
@@ -218,6 +242,7 @@ class CommunicationService : LifecycleService() {
         listenForBleToTcpMessages()
         listenForWifiDirectToTcpMessages()
         listenForTcpToWifiDirectMessages()
+
 
         val filter = IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
         registerReceiver(bondStateReceiver, filter)
@@ -1020,6 +1045,13 @@ class CommunicationService : LifecycleService() {
                 }
                 if (eventDescription != null) { addDetectionEvent(eventDescription) }
 
+                val detectedCustomKeyword = customKeywords.find { keyword ->
+                    trimmedMessage.contains(keyword, ignoreCase = true)
+                }
+                if (detectedCustomKeyword != null) {
+                    addCustomSoundEvent("'$detectedCustomKeyword' 단어 감지됨 (TCP)")
+                }
+
                 if (connectedThread != null && _bleUiState.value.connectedDeviceName != null) {
                     Log.d(TAG_BLE, "Service forwarding TCP message to BLE device.")
                     connectedThread?.write(message.toByteArray())
@@ -1268,6 +1300,16 @@ class CommunicationService : LifecycleService() {
         }
     }
 
+    private fun addCustomSoundEvent(description: String) {
+        lifecycleScope.launch {
+            val currentTime = timeFormatter.format(Date())
+            val newEvent = CustomSoundEvent(description = description, timestamp = currentTime)
+            val currentList = _customSoundEventLog.value
+            val updatedList = (listOf(newEvent) + currentList).take(MAX_DETECTION_LOG_SIZE)
+            _customSoundEventLog.value = updatedList
+            Log.i(TAG_SERVICE, "Custom Sound Event Added: $description")
+        }
+    }
 
     // --- Wi-Fi Direct BroadcastReceiver (Inner Class) ---
     inner class WiFiDirectBroadcastReceiver(

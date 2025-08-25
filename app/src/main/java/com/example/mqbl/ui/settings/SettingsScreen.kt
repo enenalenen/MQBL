@@ -35,6 +35,10 @@ fun SettingsScreen(
     settingsUiState: SettingsUiState,
     onBackgroundExecutionToggled: (Boolean) -> Unit,
 
+    customKeywords: String,
+    onCustomKeywordsChange: (String) -> Unit,
+    onSaveCustomKeywords: () -> Unit,
+
     // BLE
     bleUiState: BleUiState,
     bondedDevices: List<BluetoothDevice>,
@@ -88,6 +92,34 @@ fun SettingsScreen(
     ) {
         item {
             Text("연결 및 장치 설정", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(bottom = 16.dp))
+        }
+
+        item {
+            Card(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("감지 단어 설정", style = MaterialTheme.typography.titleMedium)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "쉼표(,)로 단어를 구분하여 입력하세요. TCP/IP로 수신된 메시지에 해당 단어가 포함되면 '알림' 탭의 '최근 감지된 음성'에 기록됩니다.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = customKeywords,
+                        onValueChange = onCustomKeywordsChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("예: 불이야, 저기요, 홍길동씨") }
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = onSaveCustomKeywords,
+                        modifier = Modifier.align(Alignment.End)
+                    ) {
+                        Text("단어 저장")
+                    }
+                }
+            }
         }
 
         // --- 앱 설정 섹션 ---
@@ -417,6 +449,9 @@ fun SettingsScreenPreview() {
             onServerPortChange = {},
             onTcpConnect = {},
             onTcpDisconnect = {},
+            customKeywords = "fire, help",
+            onCustomKeywordsChange = {},
+            onSaveCustomKeywords = {},
             // --- ▼▼▼ Preview에서 Wi-Fi Direct 파라미터 주석 처리 ▼▼▼ ---
             /*
             wifiDirectUiState = WifiDirectUiState(

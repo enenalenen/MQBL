@@ -181,11 +181,13 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
                 val uiState by bleViewModel.uiState.collectAsStateWithLifecycle()
                 val bondedDevices by bleViewModel.bondedDevices.collectAsStateWithLifecycle()
                 val detectionLog by bleViewModel.detectionEventLog.collectAsStateWithLifecycle()
+                val customSoundLog by bleViewModel.customSoundEventLog.collectAsStateWithLifecycle()
 
                 BleScreen(
                     uiState = uiState,
                     bondedDevices = bondedDevices,
                     detectionLog = detectionLog,
+                    customSoundLog = customSoundLog,
                     onDeviceSelected = { },
                     onSendValue = { },
                     onRequestPermissions = { },
@@ -196,6 +198,7 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
             composable(Screen.Settings.route) {
                 val settingsViewModel: SettingsViewModel = viewModel()
                 val settingsUiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
+                val customKeywords by settingsViewModel.customKeywords.collectAsStateWithLifecycle()
 
                 val bleViewModel: BleViewModel = viewModel()
                 val bleUiState by bleViewModel.uiState.collectAsStateWithLifecycle()
@@ -263,6 +266,10 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
                     // App Settings
                     settingsUiState = settingsUiState,
                     onBackgroundExecutionToggled = settingsViewModel::toggleBackgroundExecution,
+
+                    customKeywords = customKeywords,
+                    onCustomKeywordsChange = settingsViewModel::updateCustomKeywords,
+                    onSaveCustomKeywords = settingsViewModel::saveCustomKeywords,
                     // BLE
                     bleUiState = bleUiState,
                     bondedDevices = bondedDevices,
