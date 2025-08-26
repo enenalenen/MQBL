@@ -691,9 +691,9 @@ class CommunicationService : LifecycleService() {
         val trimmedMessage = message.trim()
         var eventDescription: String? = null
         when (trimmedMessage.lowercase()) {
-            "siren" -> eventDescription = "사이렌 감지됨 (BLE)"
-            "horn" -> eventDescription = "경적 감지됨 (BLE)"
-            "boom" -> eventDescription = "폭발음 감지됨 (BLE)"
+            "siren" -> eventDescription = "사이렌 감지됨"
+            "horn" -> eventDescription = "경적 감지됨"
+            "boom" -> eventDescription = "폭발음 감지됨"
         }
         if (eventDescription != null) {
             addDetectionEvent(eventDescription)
@@ -1039,9 +1039,9 @@ class CommunicationService : LifecycleService() {
                 val trimmedMessage = message.trim()
                 var eventDescription: String? = null
                 when (trimmedMessage.lowercase()) {
-                    "siren" -> eventDescription = "사이렌 감지됨 (TCP)"
-                    "horn" -> eventDescription = "경적 감지됨 (TCP)"
-                    "boom" -> eventDescription = "폭발음 감지됨 (TCP)"
+                    "siren" -> eventDescription = "사이렌 감지됨"
+                    "horn" -> eventDescription = "경적 감지됨"
+                    "boom" -> eventDescription = "폭발음 감지됨"
                 }
                 if (eventDescription != null) { addDetectionEvent(eventDescription) }
 
