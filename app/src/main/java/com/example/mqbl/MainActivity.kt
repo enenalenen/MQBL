@@ -207,8 +207,7 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
 
                 val tcpViewModel: TcpViewModel = viewModel()
                 val tcpUiState by tcpViewModel.tcpUiState.collectAsStateWithLifecycle()
-                val currentServerIp by tcpViewModel.serverIp.collectAsStateWithLifecycle()
-                val currentServerPort by tcpViewModel.serverPort.collectAsStateWithLifecycle()
+
 
                 // --- ▼▼▼ Wi-Fi Direct ViewModel 및 관련 코드 주석 처리 ▼▼▼ ---
                 // val wifiDirectViewModel: WifiDirectViewModel = viewModel()
@@ -283,10 +282,6 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
                     onPairDevice = bleViewModel::pairWithDevice,
                     // TCP
                     tcpUiState = tcpUiState,
-                    currentServerIp = currentServerIp,
-                    currentServerPort = currentServerPort,
-                    onServerIpChange = tcpViewModel::updateServerIp,
-                    onServerPortChange = tcpViewModel::updateServerPort,
                     onTcpConnect = tcpViewModel::connect,
                     onTcpDisconnect = tcpViewModel::disconnect,
                     // Wi-Fi Direct 파라미터 전달 부분 주석 처리

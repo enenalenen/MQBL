@@ -53,10 +53,6 @@ fun SettingsScreen(
 
     // TCP/IP
     tcpUiState: TcpUiState,
-    currentServerIp: String,
-    currentServerPort: String,
-    onServerIpChange: (String) -> Unit,
-    onServerPortChange: (String) -> Unit,
     onTcpConnect: () -> Unit,
     onTcpDisconnect: () -> Unit,
 
@@ -280,12 +276,6 @@ fun SettingsScreen(
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text("TCP/IP 서버 설정", style = MaterialTheme.typography.titleMedium)
                     Spacer(modifier = Modifier.height(8.dp))
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(value = currentServerIp, onValueChange = onServerIpChange, label = { Text("서버 IP 주소") }, modifier = Modifier.weight(2f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), enabled = !tcpUiState.isConnected && !tcpUiState.connectionStatus.contains("연결 중"))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        OutlinedTextField(value = currentServerPort, onValueChange = onServerPortChange, label = { Text("포트") }, modifier = Modifier.weight(1f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), enabled = !tcpUiState.isConnected && !tcpUiState.connectionStatus.contains("연결 중"))
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
                     Text(text = tcpUiState.connectionStatus)
                     tcpUiState.errorMessage?.let { Text(text = "오류: $it", color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
                     Spacer(modifier = Modifier.height(16.dp))
@@ -443,10 +433,6 @@ fun SettingsScreenPreview() {
             onStopScan = {},
             onPairDevice = {},
             tcpUiState = TcpUiState(connectionStatus = "TCP/IP 상태: 미리보기", isConnected = true),
-            currentServerIp = "192.168.0.100",
-            currentServerPort = "12345",
-            onServerIpChange = {},
-            onServerPortChange = {},
             onTcpConnect = {},
             onTcpDisconnect = {},
             customKeywords = "fire, help",
