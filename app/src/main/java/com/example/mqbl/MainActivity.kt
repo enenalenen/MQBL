@@ -280,6 +280,7 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
                     onStartScan = bleViewModel::startScan,
                     onStopScan = bleViewModel::stopScan,
                     onPairDevice = bleViewModel::pairWithDevice,
+                    onSendCommand = bleViewModel::sendBleCommand,
                     // TCP
                     tcpUiState = tcpUiState,
                     onTcpConnect = tcpViewModel::connect,

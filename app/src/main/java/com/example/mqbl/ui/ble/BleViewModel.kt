@@ -136,6 +136,13 @@ class BleViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun sendBleCommand(command: String) {
+        Log.d(TAG, "UI Action: Request send command '$command'")
+        _binder.value?.getService()?.sendBleString(command) ?: run {
+            Log.e(TAG, "Cannot send command: Service not bound yet.")
+        }
+    }
+
     fun startScan() {
         Log.i(TAG, "UI Action: Request start BLE scan")
         _binder.value?.getService()?.startBleScan()

@@ -317,6 +317,15 @@ class CommunicationService : LifecycleService() {
         }
     }
 
+    fun sendBleString(message: String) {
+        if (bluetoothGatt == null || txCharacteristic == null) {
+            Log.w(TAG_BLE, "Cannot send BLE string, not connected or TX characteristic not found.")
+            _bleUiState.update { it.copy(connectError = "BLE 메시지 전송 실패: 연결 안됨") }
+            return
+        }
+        writeCharacteristic(txCharacteristic!!, message.toByteArray(Charsets.UTF_8))
+    }
+
     // --- TCP Public Methods ---
     fun requestTcpConnect(ip: String, port: Int) {
         Log.i(TAG_TCP, "Request TCP Connect received for $ip:$port")
