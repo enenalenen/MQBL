@@ -6,10 +6,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothDevice
-import android.bluetooth.BluetoothManager
-import android.bluetooth.BluetoothSocket
+import android.bluetooth.*
 import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
@@ -76,7 +73,13 @@ private const val TAG_SERVICE = "CommService"
 private const val TAG_BLE = "CommService_BLE"
 private const val TAG_TCP = "CommService_TCP"
 private const val TAG_WIFI_DIRECT = "CommService_WD"
-private val BT_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB") // Standard SerialPortService ID
+// Standard BLE Service and Characteristic UUIDs (예시: Nordic UART Service)
+// ESP32 코드에 설정된 UUID로 변경해야 합니다.
+private val UART_SERVICE_UUID: UUID = UUID.fromString("6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
+private val UART_RX_CHARACTERISTIC_UUID: UUID = UUID.fromString("6E400003-B5A3-F393-E0A9-E50E24DCCA9E") // For notifications (ESP32 -> App)
+private val UART_TX_CHARACTERISTIC_UUID: UUID = UUID.fromString("6E400002-B5A3-F393-E0A9-E50E24DCCA9E") // For writing (App -> ESP32)
+private val CLIENT_CHARACTERISTIC_CONFIG_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb") // Standard CCCD
+
 private const val MAX_DETECTION_LOG_SIZE = 10
 private const val DEFAULT_TCP_SERVER_IP = "192.168.0.18" // 기본 TCP 서버 IP
 private const val DEFAULT_TCP_SERVER_PORT = 12345       // 기본 TCP 서버 포트
@@ -121,8 +124,11 @@ class CommunicationService : LifecycleService() {
     // BLE
     private lateinit var bluetoothManager: BluetoothManager
     private var bluetoothAdapter: BluetoothAdapter? = null
-    private var connectThread: ConnectThread? = null
-    private var connectedThread: ConnectedThread? = null
+    // --- GATT 관련 변수 추가 ---
+    private var bluetoothGatt: BluetoothGatt? = null
+    private var txCharacteristic: BluetoothGattCharacteristic? = null
+    private var rxCharacteristic: BluetoothGattCharacteristic? = null
+
     private val _bleUiState = MutableStateFlow(BleUiState())
     private val _bondedDevices = MutableStateFlow<List<BluetoothDevice>>(emptyList())
     private val _detectionEventLog = MutableStateFlow<List<DetectionEvent>>(emptyList())
@@ -572,7 +578,6 @@ class CommunicationService : LifecycleService() {
         }
     }
 
-
     @SuppressLint("MissingPermission")
     private fun connectToDevice(device: BluetoothDevice) {
         if (!hasRequiredBlePermissions()) {
@@ -591,18 +596,21 @@ class CommunicationService : LifecycleService() {
         Log.i(TAG_BLE, "Service starting connection to ${device.address} ($deviceName)")
         _bleUiState.update { it.copy(status = "상태: ${deviceName}에 연결 중...", isConnecting = true, connectError = null) }
         updateNotificationCombined()
-        disconnectBle()
-        connectThread = ConnectThread(device)
-        connectThread?.start()
+
+        disconnectBle() // 이전 연결 정리
+        bluetoothGatt = device.connectGatt(this, false, gattCallback)
     }
 
+    @SuppressLint("MissingPermission")
     private fun disconnectBle() {
-        if (connectThread == null && connectedThread == null && !_bleUiState.value.isConnecting && _bleUiState.value.connectedDeviceName == null) return
-        Log.i(TAG_BLE, "Disconnecting BLE connection...")
-        connectThread?.cancel()
-        connectThread = null
-        connectedThread?.cancel()
-        connectedThread = null
+        if (bluetoothGatt == null && !_bleUiState.value.isConnecting && _bleUiState.value.connectedDeviceName == null) return
+        Log.i(TAG_BLE, "Disconnecting BLE GATT connection...")
+
+        bluetoothGatt?.close()
+        bluetoothGatt = null
+        txCharacteristic = null
+        rxCharacteristic = null
+
         if (_bleUiState.value.connectedDeviceName != null || _bleUiState.value.isConnecting) {
             _bleUiState.update {
                 it.copy(
@@ -617,69 +625,13 @@ class CommunicationService : LifecycleService() {
     }
 
     private fun sendValueInternal(value: Int) {
-        if (connectedThread == null) {
-            Log.w(TAG_BLE, "Cannot send BLE data, not connected.")
+        if (bluetoothGatt == null || txCharacteristic == null) {
+            Log.w(TAG_BLE, "Cannot send BLE data, not connected or TX characteristic not found.")
             _bleUiState.update { it.copy(connectError = "BLE 메시지 전송 실패: 연결 안됨") }
             return
         }
         val message = value.toString()
-        connectedThread?.write(message.toByteArray())
-    }
-
-    @SuppressLint("MissingPermission")
-    private fun manageConnectedSocket(socket: BluetoothSocket) {
-        val deviceName = try { socket.remoteDevice.name ?: "알 수 없는 기기" } catch (e: SecurityException) { "알 수 없는 기기" }
-        Log.i(TAG_BLE, "BLE Connection successful with $deviceName.")
-        lifecycleScope.launch {
-            _bleUiState.update {
-                it.copy(
-                    status = "상태: ${deviceName}에 연결됨",
-                    connectedDeviceName = deviceName,
-                    isConnecting = false,
-                    connectError = null
-                )
-            }
-            updateNotificationCombined()
-        }
-        connectedThread?.cancel()
-        connectedThread = ConnectedThread(socket)
-        connectedThread?.start()
-    }
-
-    private fun connectionFailed(errorMsg: String = "기기 연결에 실패했습니다.") {
-        Log.e(TAG_BLE, "BLE Connection failed: $errorMsg")
-        lifecycleScope.launch {
-            _bleUiState.update {
-                it.copy(
-                    status = "상태: 연결 실패",
-                    connectedDeviceName = null,
-                    isConnecting = false,
-                    connectError = errorMsg
-                )
-            }
-            updateNotificationCombined()
-        }
-        connectThread = null
-        connectedThread?.cancel()
-        connectedThread = null
-    }
-
-    private fun connectionLost() {
-        Log.w(TAG_BLE, "BLE Connection lost.")
-        if (_bleUiState.value.connectedDeviceName != null || _bleUiState.value.status.contains("연결됨")) {
-            lifecycleScope.launch {
-                _bleUiState.update {
-                    it.copy(
-                        status = "상태: 연결 끊김",
-                        connectedDeviceName = null,
-                        isConnecting = false,
-                        connectError = "기기와의 연결이 끊어졌습니다."
-                    )
-                }
-                updateNotificationCombined()
-            }
-        }
-        connectedThread = null
+        writeCharacteristic(txCharacteristic!!, message.toByteArray(Charsets.UTF_8))
     }
 
     private fun processBleMessage(message: String) {
@@ -1052,9 +1004,9 @@ class CommunicationService : LifecycleService() {
                     addCustomSoundEvent("'$detectedCustomKeyword' 단어 감지됨 (TCP)")
                 }
 
-                if (connectedThread != null && _bleUiState.value.connectedDeviceName != null) {
+                if (bluetoothGatt != null && txCharacteristic != null) {
                     Log.d(TAG_BLE, "Service forwarding TCP message to BLE device.")
-                    connectedThread?.write(message.toByteArray())
+                    writeCharacteristic(txCharacteristic!!, message.toByteArray(Charsets.UTF_8))
                 } else {
                     Log.w(TAG_BLE, "Service cannot forward TCP message to BLE: Not connected.")
                 }
@@ -1152,151 +1104,184 @@ class CommunicationService : LifecycleService() {
         notificationManager.notify(NOTIFICATION_ID, notification)
     }
 
-    // --- BLE 통신 스레드 (Inner Class) ---
-    @SuppressLint("MissingPermission")
-    private inner class ConnectThread(private val device: BluetoothDevice) : Thread() {
-        private val mmSocket: BluetoothSocket? by lazy(LazyThreadSafetyMode.NONE) {
-            try {
-                // --- ▼▼▼ 가장 중요한 수정 부분 ▼▼▼ ---
-                // 보안 소켓 대신 비보안 소켓을 사용하여 호환성 문제를 해결합니다.
-                Log.d(TAG_BLE, "Creating Insecure RFCOMM socket to service record...")
-                device.createInsecureRfcommSocketToServiceRecord(BT_UUID)
-                // --- ▲▲▲ 가장 중요한 수정 부분 끝 ▲▲▲ ---
-            } catch (e: IOException) {
-                Log.e(TAG_BLE, "ConnectThread: Insecure Socket create failed", e)
-                lifecycleScope.launch { connectionFailed("소켓(insecure) 생성 실패: ${e.message}") }
-                null
-            } catch (e: SecurityException) {
-                Log.e(TAG_BLE, "ConnectThread: Insecure Socket create security error", e)
-                lifecycleScope.launch { connectionFailed("소켓(insecure) 생성 권한 오류: ${e.message}") }
-                null
-            }
-        }
+    // --- BluetoothGattCallback 구현 ---
+    private val gattCallback = object : BluetoothGattCallback() {
+        @SuppressLint("MissingPermission")
+        override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
+            val deviceName = gatt?.device?.name ?: "Unknown Device"
 
-        override fun run() {
-            if (mmSocket == null) {
-                connectThread = null
-                return
-            }
-            try {
-                bluetoothAdapter?.cancelDiscovery()
-            } catch (e: SecurityException){
-                Log.e(TAG_BLE, "cancelDiscovery failed due to SecurityException. Ensure permissions are granted.", e)
-            }
+            // 상세한 로그 추가
+            Log.d(TAG_BLE, "onConnectionStateChange received for $deviceName:")
+            Log.d(TAG_BLE, "  - Status: ${gattStatusToString(status)}")
+            Log.d(TAG_BLE, "  - New State: ${connectionStateToString(newState)}")
 
-
-            mmSocket?.let { socket ->
-                try {
-                    Log.i(TAG_BLE, "ConnectThread: Connecting to socket...")
-                    socket.connect()
-                    Log.i(TAG_BLE, "ConnectThread: Connection successful.")
-                    manageConnectedSocket(socket)
-                } catch (e: Exception) {
-                    Log.e(TAG_BLE, "ConnectThread: Connection failed", e)
-                    lifecycleScope.launch { connectionFailed("연결 실패: ${e.message}") }
-                    try {
-                        socket.close()
-                    } catch (ce: IOException) {
-                        Log.e(TAG_BLE, "ConnectThread: Socket close failed after connection error", ce)
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                if (newState == BluetoothProfile.STATE_CONNECTED) {
+                    Log.i(TAG_BLE, "Successfully connected to $deviceName. Discovering services...")
+                    bluetoothGatt = gatt
+                    lifecycleScope.launch {
+                        _bleUiState.update { it.copy(status = "상태: ${deviceName}에 연결됨, 서비스 검색 중...", isConnecting = false, connectedDeviceName = deviceName) }
+                        updateNotificationCombined()
+                        delay(500) // 안정성을 위해 약간의 딜레이 추가
+                        gatt?.discoverServices()
                     }
+                } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                    Log.w(TAG_BLE, "Disconnected from $deviceName.")
+                    connectionLost()
                 }
+            } else {
+                // GATT_SUCCESS가 아닌 모든 경우를 에러로 처리
+                Log.e(TAG_BLE, "GATT Error on connection state change for $deviceName.")
+                connectionLost(errorMsg = "GATT 오류: ${gattStatusToString(status)}")
             }
-            connectThread = null
         }
 
-        fun cancel() {
-            try {
-                mmSocket?.close()
-                Log.d(TAG_BLE, "ConnectThread: Socket closed on cancel.")
-            } catch (e: IOException) {
-                Log.e(TAG_BLE, "ConnectThread: Socket close failed on cancel", e)
+        override fun onServicesDiscovered(gatt: BluetoothGatt?, status: Int) {
+            Log.d(TAG_BLE, "onServicesDiscovered received with status: ${gattStatusToString(status)}")
+
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                Log.i(TAG_BLE, "Services discovered successfully.")
+                val service = gatt?.getService(UART_SERVICE_UUID)
+                if (service == null) {
+                    Log.e(TAG_BLE, "UART Service not found! UUID: $UART_SERVICE_UUID")
+                    connectionLost("UART 서비스를 찾을 수 없습니다.")
+                    return
+                }
+
+                txCharacteristic = service.getCharacteristic(UART_TX_CHARACTERISTIC_UUID)
+                rxCharacteristic = service.getCharacteristic(UART_RX_CHARACTERISTIC_UUID)
+
+                if (txCharacteristic != null && rxCharacteristic != null) {
+                    Log.i(TAG_BLE, "TX and RX Characteristics found. Enabling notifications...")
+                    enableNotifications(rxCharacteristic!!)
+                } else {
+                    Log.e(TAG_BLE, "TX or RX characteristic not found!")
+                    Log.e(TAG_BLE, " - TX UUID: $UART_TX_CHARACTERISTIC_UUID -> ${if(txCharacteristic == null) "Not Found" else "Found"}")
+                    Log.e(TAG_BLE, " - RX UUID: $UART_RX_CHARACTERISTIC_UUID -> ${if(rxCharacteristic == null) "Not Found" else "Found"}")
+                    connectionLost("TX/RX 특성을 찾을 수 없습니다.")
+                }
+            } else {
+                Log.e(TAG_BLE, "Service discovery failed.")
+                connectionLost("서비스 검색 실패")
+            }
+        }
+
+        override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
+            val message = value.toString(Charsets.UTF_8)
+            Log.i(TAG_BLE, "Received notification: $message from ${characteristic.uuid}")
+            processBleMessage(message)
+        }
+
+        override fun onCharacteristicWrite(gatt: BluetoothGatt?, characteristic: BluetoothGattCharacteristic?, status: Int) {
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                Log.d(TAG_BLE, "Write successful: ${characteristic?.value?.toString(Charsets.UTF_8)}")
+                updateBleDataLog("-> ${characteristic?.value?.toString(Charsets.UTF_8)} (BLE)")
+            } else {
+                Log.e(TAG_BLE, "Write failed with status: ${gattStatusToString(status)}")
+            }
+        }
+
+        override fun onDescriptorWrite(gatt: BluetoothGatt?, descriptor: BluetoothGattDescriptor?, status: Int) {
+            super.onDescriptorWrite(gatt, descriptor, status)
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                Log.i(TAG_BLE, "Descriptor write successful for ${descriptor?.uuid}. Notifications enabled.")
+                _bleUiState.update { it.copy(status = "상태: ${it.connectedDeviceName}에 완전 연결됨") }
+                updateNotificationCombined()
+            } else {
+                Log.e(TAG_BLE, "Descriptor write failed with status: ${gattStatusToString(status)}")
+                connectionLost("알림 활성화 실패")
             }
         }
     }
 
-    private inner class ConnectedThread(private val mmSocket: BluetoothSocket) : Thread() {
-        private val mmInStream: InputStream? = try {
-            mmSocket.inputStream
-        } catch (e: IOException) {
-            Log.e(TAG_BLE, "ConnectedThread: Error getting input stream", e)
-            lifecycleScope.launch { connectionLost() }
-            null
-        }
-        private val mmOutStream: OutputStream? = try {
-            mmSocket.outputStream
-        } catch (e: IOException) {
-            Log.e(TAG_BLE, "ConnectedThread: Error getting output stream", e)
-            lifecycleScope.launch { connectionLost() }
-            null
-        }
-        private var isRunning = true
-
-        override fun run() {
-            Log.i(TAG_BLE, "ConnectedThread: Listening for incoming data...")
-            val buffer = ByteArray(1024)
-            val messageBuilder = StringBuilder()
-
-            while (isRunning) {
-                if (mmInStream == null) {
-                    lifecycleScope.launch { connectionLost() }
-                    break
-                }
-                try {
-                    val numBytes = mmInStream.read(buffer)
-                    if (numBytes > 0) {
-                        val readChunk = String(buffer, 0, numBytes, Charsets.UTF_8)
-                        messageBuilder.append(readChunk)
-
-                        var newlineIndex = messageBuilder.indexOf('\n')
-                        while (newlineIndex >= 0) {
-                            val line = messageBuilder.substring(0, newlineIndex)
-                            val finalMessage = if (line.endsWith('\r')) line.dropLast(1) else line
-                            Log.d(TAG_BLE, "Received complete line: '$finalMessage'")
-                            processBleMessage(finalMessage)
-                            messageBuilder.delete(0, newlineIndex + 1)
-                            newlineIndex = messageBuilder.indexOf('\n')
-                        }
-                    } else if (numBytes == -1) {
-                        Log.w(TAG_BLE, "ConnectedThread: End of stream reached. Connection closed by peer.")
-                        isRunning = false
-                        lifecycleScope.launch { connectionLost() }
-                    }
-                } catch (e: IOException) {
-                    Log.w(TAG_BLE, "ConnectedThread: Read failed, disconnecting.", e)
-                    isRunning = false
-                    lifecycleScope.launch { connectionLost() }
-                }
-            }
-            Log.i(TAG_BLE, "ConnectedThread: Finished.")
-            if (this@CommunicationService.connectedThread == this) {
-                this@CommunicationService.connectedThread = null
-            }
+    @SuppressLint("MissingPermission")
+    private fun enableNotifications(characteristic: BluetoothGattCharacteristic) {
+        val cccd = characteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG_UUID)
+        if (cccd == null) {
+            Log.e(TAG_BLE, "CCCD not found for RX characteristic! UUID: $CLIENT_CHARACTERISTIC_CONFIG_UUID")
+            connectionLost("알림 설정(CCCD)을 찾을 수 없습니다.")
+            return
         }
 
-        fun write(bytes: ByteArray) {
-            if (mmOutStream == null) {
-                lifecycleScope.launch { connectionLost() }
+        // 알림 활성화
+        bluetoothGatt?.setCharacteristicNotification(characteristic, true)
+
+        // 디스크립터에 값 쓰기
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val result = bluetoothGatt?.writeDescriptor(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+            Log.d(TAG_BLE, "writeDescriptor (Android 13+) result: $result")
+        } else {
+            cccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+            val result = bluetoothGatt?.writeDescriptor(cccd)
+            Log.d(TAG_BLE, "writeDescriptor (legacy) result: $result")
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun writeCharacteristic(characteristic: BluetoothGattCharacteristic, payload: ByteArray) {
+        val writeType = when {
+            characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE != 0 -> BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0 -> BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+            else -> {
+                Log.e(TAG_BLE, "Characteristic cannot be written to")
                 return
             }
-            try {
-                mmOutStream.write(bytes)
-                mmOutStream.flush()
-                Log.d(TAG_BLE, "Data sent: ${String(bytes, Charsets.UTF_8)}")
-                updateBleDataLog("-> ${String(bytes, Charsets.UTF_8)} (BLE)")
-            } catch (e: IOException) {
-                Log.e(TAG_BLE, "ConnectedThread: Write Error", e)
-                lifecycleScope.launch { connectionLost() }
-            }
         }
 
-        fun cancel() {
-            isRunning = false
-            try {
-                mmSocket.close()
-                Log.d(TAG_BLE, "ConnectedThread: Socket closed on cancel.")
-            } catch (e: IOException) {
-                Log.e(TAG_BLE, "ConnectedThread: Socket close error on cancel", e)
+        bluetoothGatt?.let { gatt ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                gatt.writeCharacteristic(characteristic, payload, writeType)
+            } else {
+                characteristic.writeType = writeType
+                characteristic.value = payload
+                gatt.writeCharacteristic(characteristic)
             }
+        } ?: Log.e(TAG_BLE, "Gatt is null, cannot write characteristic")
+    }
+
+    private fun connectionLost(errorMsg: String? = null) {
+        Log.w(TAG_BLE, "BLE GATT Connection lost. Error: $errorMsg")
+        val finalError = errorMsg ?: "기기와의 연결이 끊어졌습니다."
+        if (_bleUiState.value.connectedDeviceName != null || _bleUiState.value.isConnecting) {
+            lifecycleScope.launch {
+                _bleUiState.update {
+                    it.copy(
+                        status = "상태: 연결 끊김",
+                        connectedDeviceName = null,
+                        isConnecting = false,
+                        connectError = finalError
+                    )
+                }
+                updateNotificationCombined()
+            }
+        }
+        disconnectBle()
+    }
+
+    // --- 디버깅용 Helper 함수 추가 ---
+    private fun gattStatusToString(status: Int): String {
+        return when (status) {
+            BluetoothGatt.GATT_SUCCESS -> "GATT_SUCCESS (0)"
+            BluetoothGatt.GATT_FAILURE -> "GATT_FAILURE (257)"
+            BluetoothGatt.GATT_READ_NOT_PERMITTED -> "GATT_READ_NOT_PERMITTED (2)"
+            BluetoothGatt.GATT_WRITE_NOT_PERMITTED -> "GATT_WRITE_NOT_PERMITTED (3)"
+            BluetoothGatt.GATT_INSUFFICIENT_AUTHENTICATION -> "GATT_INSUFFICIENT_AUTHENTICATION (5)"
+            BluetoothGatt.GATT_INSUFFICIENT_ENCRYPTION -> "GATT_INSUFFICIENT_ENCRYPTION (15)"
+            BluetoothGatt.GATT_INVALID_ATTRIBUTE_LENGTH -> "GATT_INVALID_ATTRIBUTE_LENGTH (13)"
+            133 -> "GATT_ERROR (133)" // 가장 흔한 일반 오류
+            8 -> "GATT_CONN_TIMEOUT (8)"
+            19 -> "GATT_CONN_TERMINATE_PEER_USER (19)"
+            else -> "Unknown Status ($status)"
+        }
+    }
+
+    private fun connectionStateToString(state: Int): String {
+        return when (state) {
+            BluetoothProfile.STATE_CONNECTED -> "STATE_CONNECTED"
+            BluetoothProfile.STATE_CONNECTING -> "STATE_CONNECTING"
+            BluetoothProfile.STATE_DISCONNECTED -> "STATE_DISCONNECTED"
+            BluetoothProfile.STATE_DISCONNECTING -> "STATE_DISCONNECTING"
+            else -> "Unknown State ($state)"
         }
     }
 
@@ -1579,3 +1564,4 @@ class CommunicationService : LifecycleService() {
         Log.i(TAG_SERVICE, "Alert notification sent: $contentText")
     }
 }
+
