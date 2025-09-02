@@ -200,7 +200,9 @@ class CommunicationService : LifecycleService() {
 
     // TCP/IP
     private var tcpSocket: Socket? = null
-    private var tcpPrintWriter: PrintWriter? = null
+    // --- ▼▼▼ PrintWriter -> OutputStream으로 변경 ▼▼▼ ---
+    private var tcpOutputStream: OutputStream? = null
+    // --- ▲▲▲ 변경 끝 ▲▲▲ ---
     private var tcpBufferedReader: BufferedReader? = null
     private var tcpReceiveJob: Job? = null
     private var currentServerIp: String = DEFAULT_TCP_SERVER_IP
@@ -244,8 +246,12 @@ class CommunicationService : LifecycleService() {
         createNotificationChannel()
         initializeBle()
         //initializeWifiDirect()
-        listenForTcpToBleMessages()
-        listenForBleToTcpMessages()
+
+        // --- ▼▼▼ Hub 리스너 변경 ▼▼▼ ---
+        listenForBleAudioToTcpMessages() // 오디오 스트림 리스너
+        listenForTcpToBleMessages()      // 서버 응답(텍스트) 리스너
+        // --- ▲▲▲ 변경 끝 ▲▲▲ ---
+
         listenForWifiDirectToTcpMessages()
         listenForTcpToWifiDirectMessages()
 
@@ -310,13 +316,6 @@ class CommunicationService : LifecycleService() {
     fun requestBleConnect(device: BluetoothDevice) { connectToDevice(device) }
     fun requestBleDisconnect() { disconnectBle() }
     fun sendBleValue(value: Int) { sendValueInternal(value) }
-    fun refreshBleState() {
-        checkBlePermissionsAndLoadDevices()
-        if (bluetoothAdapter?.isEnabled == false && _bleUiState.value.connectedDeviceName == null) {
-            _bleUiState.update { it.copy(status = "상태: 블루투스 비활성화됨") }
-        }
-    }
-
     fun sendBleString(message: String) {
         if (bluetoothGatt == null || txCharacteristic == null) {
             Log.w(TAG_BLE, "Cannot send BLE string, not connected or TX characteristic not found.")
@@ -324,6 +323,12 @@ class CommunicationService : LifecycleService() {
             return
         }
         writeCharacteristic(txCharacteristic!!, message.toByteArray(Charsets.UTF_8))
+    }
+    fun refreshBleState() {
+        checkBlePermissionsAndLoadDevices()
+        if (bluetoothAdapter?.isEnabled == false && _bleUiState.value.connectedDeviceName == null) {
+            _bleUiState.update { it.copy(status = "상태: 블루투스 비활성화됨") }
+        }
     }
 
     // --- TCP Public Methods ---
@@ -643,24 +648,14 @@ class CommunicationService : LifecycleService() {
         writeCharacteristic(txCharacteristic!!, message.toByteArray(Charsets.UTF_8))
     }
 
-    private fun processBleMessage(message: String) {
-        updateBleDataLog("<- $message (BLE)")
+    // --- ▼▼▼ BLE 데이터 처리 로직 수정 ▼▼▼ ---
+    private fun processBleAudioData(data: ByteArray) {
         lifecycleScope.launch {
-            Log.d(TAG_BLE, "Forwarding message from BLE to Hub for TCP: $message")
-            CommunicationHub.emitBleToTcp(message)
-        }
-        val trimmedMessage = message.trim()
-        var eventDescription: String? = null
-        when (trimmedMessage.lowercase()) {
-            "siren" -> eventDescription = "사이렌 감지됨"
-            "horn" -> eventDescription = "경적 감지됨"
-            "boom" -> eventDescription = "폭발음 감지됨"
-        }
-        if (eventDescription != null) {
-            addDetectionEvent(eventDescription)
-            sendAlertNotification(eventDescription)
+            Log.d(TAG_BLE, "Forwarding ${data.size} bytes from BLE to Hub for TCP")
+            CommunicationHub.emitBleAudioToTcp(data)
         }
     }
+    // --- ▲▲▲ 수정 끝 ▲▲▲ ---
 
     private fun updateBleDataLog(logEntry: String) {
         lifecycleScope.launch {
@@ -706,7 +701,9 @@ class CommunicationService : LifecycleService() {
                 tcpSocket?.connect(InetSocketAddress(currentServerIp, currentServerPort), SOCKET_TIMEOUT)
 
                 if (tcpSocket?.isConnected == true) {
-                    tcpPrintWriter = PrintWriter(tcpSocket!!.getOutputStream(), true)
+                    // --- ▼▼▼ OutputStream을 가져오도록 수정 ▼▼▼ ---
+                    tcpOutputStream = tcpSocket!!.getOutputStream()
+                    // --- ▲▲▲ 수정 끝 ▲▲▲ ---
                     tcpBufferedReader = BufferedReader(InputStreamReader(tcpSocket!!.getInputStream()))
                     _tcpUiState.update { it.copy(isConnected = true, connectionStatus = "TCP/IP: 연결됨", errorMessage = null) }
                     Log.i(TAG_TCP, "TCP Connected to $currentServerIp:$currentServerPort")
@@ -759,15 +756,18 @@ class CommunicationService : LifecycleService() {
     }
 
     private fun sendTcpData(message: String) {
-        if (tcpSocket?.isConnected != true || tcpPrintWriter == null) {
-            Log.w(TAG_TCP, "Cannot send TCP data: Not connected.")
+        if (tcpSocket?.isConnected != true || tcpOutputStream == null) {
+            Log.w(TAG_TCP, "Cannot send TCP text data: Not connected.")
             _tcpUiState.update { it.copy(errorMessage = "TCP 메시지 전송 실패: 연결 안됨") }
             return
         }
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                tcpPrintWriter?.println(message)
-                Log.i(TAG_TCP, "TCP Sent: $message")
+                // 텍스트 전송을 위해 끝에 개행 문자를 추가합니다.
+                val dataToSend = (message + "\n").toByteArray(Charsets.UTF_8)
+                tcpOutputStream?.write(dataToSend)
+                tcpOutputStream?.flush()
+                Log.i(TAG_TCP, "TCP Sent (Text): $message")
                 val sentItem = TcpMessageItem(source = "클라이언트 -> 서버", payload = message)
                 _receivedTcpMessages.update { list -> (listOf(sentItem) + list).take(MAX_TCP_LOG_SIZE) }
             } catch (e: Exception) {
@@ -777,6 +777,27 @@ class CommunicationService : LifecycleService() {
             }
         }
     }
+
+    // --- ▼▼▼ 오디오(ByteArray) 전송을 위한 함수 추가 ▼▼▼ ---
+    private fun sendTcpAudioData(data: ByteArray) {
+        if (tcpSocket?.isConnected != true || tcpOutputStream == null) {
+            Log.w(TAG_TCP, "Cannot send TCP audio data: Not connected.")
+            return // UI 에러 표시는 너무 빈번할 수 있으므로 로그만 남김
+        }
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                tcpOutputStream?.write(data)
+                tcpOutputStream?.flush()
+                // 오디오 데이터는 너무 커서 로그에는 크기만 남김
+                // Log.d(TAG_TCP, "TCP Sent (Audio): ${data.size} bytes")
+            } catch (e: Exception) {
+                Log.e(TAG_TCP, "TCP Audio Send Error", e)
+                _tcpUiState.update { it.copy(errorMessage = "TCP 오디오 전송 오류: ${e.message}") }
+                disconnectTcpInternal(userRequested = false, "오디오 전송 중 연결 끊김")
+            }
+        }
+    }
+    // --- ▲▲▲ 함수 추가 끝 ▲▲▲ ---
 
     private fun disconnectTcpInternal(userRequested: Boolean, reason: String? = null) {
         if (tcpSocket == null && !_tcpUiState.value.isConnected && !_tcpUiState.value.connectionStatus.contains("연결 중")) {
@@ -801,11 +822,13 @@ class CommunicationService : LifecycleService() {
     }
 
     private fun closeTcpSocketResources() {
-        try { tcpPrintWriter?.close() } catch (e: IOException) { Log.e(TAG_TCP, "Error closing PrintWriter", e) }
+        // --- ▼▼▼ PrintWriter -> OutputStream으로 변경 ▼▼▼ ---
+        try { tcpOutputStream?.close() } catch (e: IOException) { Log.e(TAG_TCP, "Error closing OutputStream", e) }
+        // --- ▲▲▲ 변경 끝 ▲▲▲ ---
         try { tcpBufferedReader?.close() } catch (e: IOException) { Log.e(TAG_TCP, "Error closing BufferedReader", e) }
         try { tcpSocket?.close() } catch (e: IOException) { Log.e(TAG_TCP, "Error closing socket", e) }
         tcpSocket = null
-        tcpPrintWriter = null
+        tcpOutputStream = null
         tcpBufferedReader = null
         Log.d(TAG_TCP, "TCP socket resources closed.")
     }
@@ -979,19 +1002,17 @@ class CommunicationService : LifecycleService() {
     }
 
     // --- Hub Listeners ---
-    private fun listenForBleToTcpMessages() {
+    // --- ▼▼▼ 오디오 스트림을 수신하여 TCP로 전송하는 리스너 추가 ▼▼▼ ---
+    private fun listenForBleAudioToTcpMessages() {
         lifecycleScope.launch {
-            CommunicationHub.bleToTcpFlow.collect { message ->
-                Log.i(TAG_TCP, "Service received message from Hub (BLE->TCP): $message")
+            CommunicationHub.bleAudioToTcpFlow.collect { audioData ->
                 if (_tcpUiState.value.isConnected) {
-                    Log.d(TAG_TCP, "Service sending BLE message via TCP")
-                    sendTcpData(message)
-                } else {
-                    Log.w(TAG_TCP, "Service cannot send BLE message via TCP: Not connected.")
+                    sendTcpAudioData(audioData)
                 }
             }
         }
     }
+    // --- ▲▲▲ 리스너 추가 끝 ▲▲▲ ---
 
     private fun listenForTcpToBleMessages() {
         lifecycleScope.launch {
@@ -1175,11 +1196,13 @@ class CommunicationService : LifecycleService() {
             }
         }
 
+        // --- ▼▼▼ onCharacteristicChanged 로직 수정 ▼▼▼ ---
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
-            val message = value.toString(Charsets.UTF_8)
-            Log.i(TAG_BLE, "Received notification: $message from ${characteristic.uuid}")
-            processBleMessage(message)
+            // 이제 value(ByteArray)를 문자열로 변환하지 않고 바로 처리합니다.
+            // Log.i(TAG_BLE, "Received notification: ${value.size} bytes from ${characteristic.uuid}")
+            processBleAudioData(value)
         }
+        // --- ▲▲▲ 수정 끝 ▲▲▲ ---
 
         override fun onCharacteristicWrite(gatt: BluetoothGatt?, characteristic: BluetoothGattCharacteristic?, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
