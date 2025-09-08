@@ -48,8 +48,8 @@ class TcpViewModel(application: Application) : AndroidViewModel(application) {
 
     fun connect() {
         // ▼▼▼ 여기에 IP 주소와 포트를 직접 입력하세요 ▼▼▼
-        val hardcodedIp = "192.168.0.5"
-        val hardcodedPort = 12345
+        val hardcodedIp = "192.168.10.200"
+        val hardcodedPort = 6789
         // ▲▲▲ 여기에 IP 주소와 포트를 직접 입력하세요 ▲▲▲
 
         Log.i(TAG, "UI Action: Request TCP connect to hardcoded address $hardcodedIp:$hardcodedPort")

@@ -81,8 +81,8 @@ private val UART_TX_CHARACTERISTIC_UUID: UUID = UUID.fromString("6E400002-B5A3-F
 private val CLIENT_CHARACTERISTIC_CONFIG_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb") // Standard CCCD
 
 private const val MAX_DETECTION_LOG_SIZE = 10
-private const val DEFAULT_TCP_SERVER_IP = "192.168.0.18" // 기본 TCP 서버 IP
-private const val DEFAULT_TCP_SERVER_PORT = 12345       // 기본 TCP 서버 포트
+private const val DEFAULT_TCP_SERVER_IP = "192.168.10.200" // 기본 TCP 서버 IP
+private const val DEFAULT_TCP_SERVER_PORT = 6789       // 기본 TCP 서버 포트
 private const val MAX_TCP_LOG_SIZE = 50
 private const val WIFI_DIRECT_SERVER_PORT = 8888       // Wi-Fi Direct 소켓 통신 포트
 private const val MAX_WIFI_DIRECT_LOG_SIZE = 20
