@@ -24,9 +24,8 @@ private const val TAG = "SettingsViewModel"
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val settingsRepository = SettingsRepository(application)
+    private val settingsRepository = SettingsRepository.getInstance(application)
 
-    // --- ▼▼▼ CommunicationService 바인딩 로직 추가 ▼▼▼ ---
     private val _binder = MutableStateFlow<CommunicationService.LocalBinder?>(null)
 
     private val serviceConnection = object : ServiceConnection {
@@ -37,7 +36,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             _binder.value = null
         }
     }
-    // --- ▲▲▲ 바인딩 로직 추가 끝 ▲▲▲ ---
 
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState = _uiState.asStateFlow()
@@ -45,12 +43,17 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private val _customKeywords = MutableStateFlow("")
     val customKeywords = _customKeywords.asStateFlow()
 
+    private val _tcpServerIp = MutableStateFlow("")
+    val tcpServerIp = _tcpServerIp.asStateFlow()
+
+    private val _tcpServerPort = MutableStateFlow("")
+    val tcpServerPort = _tcpServerPort.asStateFlow()
+
+
     init {
-        // --- ▼▼▼ 서비스 바인딩 시작 ▼▼▼ ---
         Intent(application, CommunicationService::class.java).also { intent ->
             application.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
         }
-        // --- ▲▲▲ 바인딩 시작 끝 ▲▲▲ ---
 
         settingsRepository.isBackgroundExecutionEnabledFlow
             .onEach { isEnabled ->
@@ -63,26 +66,49 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 _customKeywords.value = keywords
             }
             .launchIn(viewModelScope)
+
+        settingsRepository.tcpServerIpFlow
+            .onEach { ip ->
+                _tcpServerIp.value = ip
+            }
+            .launchIn(viewModelScope)
+
+        settingsRepository.tcpServerPortFlow
+            .onEach { port ->
+                _tcpServerPort.value = port
+            }
+            .launchIn(viewModelScope)
     }
+
+    fun onTcpServerIpChange(ip: String) {
+        _tcpServerIp.value = ip
+    }
+
+    fun onTcpServerPortChange(port: String) {
+        _tcpServerPort.value = port
+    }
+
+    fun saveTcpSettings() {
+        viewModelScope.launch {
+            settingsRepository.setTcpServerIp(_tcpServerIp.value)
+            settingsRepository.setTcpServerPort(_tcpServerPort.value)
+            Toast.makeText(getApplication(), "TCP/IP 설정이 저장되었습니다.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
 
     fun updateCustomKeywords(keywords: String) {
         _customKeywords.value = keywords
     }
 
-    // --- ▼▼▼ saveCustomKeywords 함수 로직 수정 ▼▼▼ ---
     fun saveCustomKeywords() {
         viewModelScope.launch {
-            // 1. 기존 로직: SharedPreferences에 저장
             settingsRepository.setCustomKeywords(_customKeywords.value)
 
-            // --- ▼▼▼ 에러 수정: getService() 호출 제거 ---
-            // LocalBinder가 getTcpUiStateFlow()를 직접 가지고 있으므로 바로 호출합니다.
             val tcpUiState = _binder.value?.getTcpUiStateFlow()?.first()
 
-            // 2. 새로운 로직: TCP 서버로 업데이트 명령어 전송
             if (tcpUiState?.isConnected == true) {
                 val command = "CMD_UPDATE_KEYWORDS:${_customKeywords.value}"
-                // sendTcpMessage는 Service에 있으므로 여기서는 getService() 호출이 필요합니다.
                 _binder.value?.getService()?.sendTcpMessage(command)
                 Toast.makeText(getApplication(), "단어가 로컬 및 서버에 저장되었습니다.", Toast.LENGTH_SHORT).show()
                 Log.d(TAG, "Keywords saved locally and sent to server: ${_customKeywords.value}")
@@ -92,7 +118,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             }
         }
     }
-    // --- ▲▲▲ 함수 로직 수정 끝 ▲▲▲ ---
 
     fun toggleBackgroundExecution(enabled: Boolean) {
         viewModelScope.launch {
@@ -111,7 +136,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    // --- ▼▼▼ onCleared에 서비스 unbind 로직 추가 ▼▼▼ ---
     override fun onCleared() {
         super.onCleared()
         try {
@@ -121,6 +145,5 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
         _binder.value = null
     }
-    // --- ▲▲▲ unbind 로직 추가 끝 ▲▲▲ ---
 }
 

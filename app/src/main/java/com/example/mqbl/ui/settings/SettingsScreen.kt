@@ -4,12 +4,14 @@ import android.bluetooth.BluetoothDevice
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -40,12 +42,15 @@ fun SettingsScreen(
     onStopScan: () -> Unit,
     onPairDevice: (BluetoothDevice) -> Unit,
 
-    // --- ▼▼▼ 테스트 커맨드 전송을 위한 파라미터 추가 ▼▼▼ ---
     onSendCommand: (String) -> Unit,
-    // --- ▲▲▲ 파라미터 추가 끝 ▲▲▲ ---
 
     // TCP/IP
     tcpUiState: TcpUiState,
+    tcpServerIp: String,
+    tcpServerPort: String,
+    onTcpServerIpChange: (String) -> Unit,
+    onTcpServerPortChange: (String) -> Unit,
+    onSaveTcpSettings: () -> Unit,
     onTcpConnect: () -> Unit,
     onTcpDisconnect: () -> Unit,
 ) {
@@ -66,7 +71,7 @@ fun SettingsScreen(
                     Text("감지 단어 설정", style = MaterialTheme.typography.titleMedium)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        "쉼표(,)로 단어를 구분하여 입력하세요. TCP/IP로 수신된 메시지에 해당 단어가 포함되면 '알림' 탭의 '최근 감지된 음성'에 기록됩니다.",
+                        "쉼표(,)로 단어를 구분하여 입력하세요. 서버에 단어 목록이 업데이트됩니다.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -161,30 +166,24 @@ fun SettingsScreen(
                             Button(onClick = { if (currentVibrationValue < 10) { currentVibrationValue++; onSendVibrationValue(currentVibrationValue) } }, enabled = currentVibrationValue < 10, modifier = Modifier.size(width = 96.dp, height = 48.dp), shape = RoundedCornerShape(percent = 50) ) { Text(text = "+", fontSize = 30.sp) }
                         }
 
-                        Spacer(modifier = Modifier.height(16.dp)) // 여백 추가
+                        Spacer(modifier = Modifier.height(16.dp))
 
-                        // --- ▼▼▼ 테스트 버튼 섹션 추가 ▼▼▼ ---
+                        // --- ▼▼▼ 진동 테스트 버튼 수정 ▼▼▼ ---
                         Text(
                             "진동 테스트 (수동 신호 전송)",
                             modifier = Modifier.align(Alignment.CenterHorizontally),
                             style = MaterialTheme.typography.bodyLarge
                         )
                         Spacer(modifier = Modifier.height(10.dp))
-                        Row(
+                        Box(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly
+                            contentAlignment = Alignment.Center
                         ) {
-                            Button(onClick = { onSendCommand("siren") }) {
-                                Text("Siren")
-                            }
-                            Button(onClick = { onSendCommand("horn") }) {
-                                Text("Horn")
-                            }
-                            Button(onClick = { onSendCommand("boom") }) {
-                                Text("Boom")
+                            Button(onClick = { onSendCommand("VIBRATE_TRIGGER") }) {
+                                Text("진동")
                             }
                         }
-                        // --- ▲▲▲ 테스트 버튼 섹션 추가 끝 ▲▲▲ ---
+                        // --- ▲▲▲ 수정 끝 ▲▲▲ ---
                     }
                 }
             }
@@ -226,7 +225,6 @@ fun SettingsScreen(
                                         Text(deviceName, fontWeight = FontWeight.Bold)
                                         Text(device.address, fontSize = 12.sp)
                                     }
-                                    // '연결' 버튼만 남김
                                     Button(onClick = { onDeviceSelected(device) }) {
                                         Text("연결")
                                     }
@@ -246,14 +244,47 @@ fun SettingsScreen(
         item {
             Card(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("TCP/IP 서버 설정", style = MaterialTheme.typography.titleMedium)
+                    Text("STT 서버 설정", style = MaterialTheme.typography.titleMedium)
                     Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = tcpServerIp,
+                            onValueChange = onTcpServerIpChange,
+                            label = { Text("서버 IP 주소") },
+                            modifier = Modifier.weight(2f),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                            enabled = !tcpUiState.isConnected && !tcpUiState.connectionStatus.contains("연결 중")
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        OutlinedTextField(
+                            value = tcpServerPort,
+                            onValueChange = onTcpServerPortChange,
+                            label = { Text("포트") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            enabled = !tcpUiState.isConnected && !tcpUiState.connectionStatus.contains("연결 중")
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = onSaveTcpSettings,
+                        modifier = Modifier.align(Alignment.End),
+                        enabled = !tcpUiState.isConnected && !tcpUiState.connectionStatus.contains("연결 중")
+                    ) {
+                        Text("서버 주소 저장")
+                    }
+
+                    Divider(modifier = Modifier.padding(vertical = 16.dp))
+
                     Text(text = tcpUiState.connectionStatus)
                     tcpUiState.errorMessage?.let { Text(text = "오류: $it", color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
                     Spacer(modifier = Modifier.height(16.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        Button(onClick = onTcpConnect, enabled = !tcpUiState.isConnected && !tcpUiState.connectionStatus.contains("연결 중")) { Text("TCP 연결") }
-                        Button(onClick = onTcpDisconnect, enabled = tcpUiState.isConnected || tcpUiState.connectionStatus.contains("연결 중")) { Text("TCP 연결 해제") }
+                        Button(onClick = onTcpConnect, enabled = !tcpUiState.isConnected && !tcpUiState.connectionStatus.contains("연결 중")) { Text("서버 연결") }
+                        Button(onClick = onTcpDisconnect, enabled = tcpUiState.isConnected || tcpUiState.connectionStatus.contains("연결 중")) { Text("연결 해제") }
                     }
                 }
             }
@@ -280,10 +311,13 @@ fun SettingsScreenPreview() {
             onStartScan = {},
             onStopScan = {},
             onPairDevice = {},
-            // --- ▼▼▼ Preview에 파라미터 추가 ▼▼▼ ---
             onSendCommand = {},
-            // --- ▲▲▲ 추가 끝 ▲▲▲ ---
             tcpUiState = TcpUiState(connectionStatus = "TCP/IP 상태: 미리보기", isConnected = true),
+            tcpServerIp = "192.168.0.10",
+            tcpServerPort = "6789",
+            onTcpServerIpChange = {},
+            onTcpServerPortChange = {},
+            onSaveTcpSettings = {},
             onTcpConnect = {},
             onTcpDisconnect = {},
             customKeywords = "fire, help",

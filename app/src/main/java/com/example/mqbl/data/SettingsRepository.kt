@@ -8,34 +8,50 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * 앱 설정을 SharedPreferences에 저장하고 관리하는 클래스.
+ * 싱글턴으로 구현하여 앱 전체에서 하나의 인스턴스만 사용하도록 합니다.
  */
-class SettingsRepository(context: Context) {
+class SettingsRepository private constructor(context: Context) {
 
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     private val _isBackgroundExecutionEnabled = MutableStateFlow(isBackgroundExecutionEnabled())
     val isBackgroundExecutionEnabledFlow: StateFlow<Boolean> = _isBackgroundExecutionEnabled.asStateFlow()
 
-    // --- ▼▼▼ 감지 단어 저장을 위한 코드 추가 ▼▼▼ ---
     private val _customKeywords = MutableStateFlow(getCustomKeywords())
     val customKeywordsFlow: StateFlow<String> = _customKeywords.asStateFlow()
 
-    /**
-     * 저장된 감지 단어를 불러옵니다. 기본값은 빈 문자열입니다.
-     * 단어들은 쉼표(,)로 구분됩니다.
-     */
+    private val _tcpServerIp = MutableStateFlow(getTcpServerIp())
+    val tcpServerIpFlow: StateFlow<String> = _tcpServerIp.asStateFlow()
+
+    private val _tcpServerPort = MutableStateFlow(getTcpServerPort())
+    val tcpServerPortFlow: StateFlow<String> = _tcpServerPort.asStateFlow()
+
     fun getCustomKeywords(): String {
         return prefs.getString(KEY_CUSTOM_KEYWORDS, "") ?: ""
     }
 
-    /**
-     * 감지 단어를 저장합니다.
-     */
     fun setCustomKeywords(keywords: String) {
         prefs.edit().putString(KEY_CUSTOM_KEYWORDS, keywords).apply()
         _customKeywords.value = keywords
     }
-    // --- ▲▲▲ 감지 단어 저장을 위한 코드 추가 끝 ▲▲▲ ---
+
+    fun getTcpServerIp(): String {
+        return prefs.getString(KEY_TCP_SERVER_IP, "192.168.0.5") ?: "192.168.0.5"
+    }
+
+    fun setTcpServerIp(ip: String) {
+        prefs.edit().putString(KEY_TCP_SERVER_IP, ip).apply()
+        _tcpServerIp.value = ip
+    }
+
+    fun getTcpServerPort(): String {
+        return prefs.getString(KEY_TCP_SERVER_PORT, "6789") ?: "6789"
+    }
+
+    fun setTcpServerPort(port: String) {
+        prefs.edit().putString(KEY_TCP_SERVER_PORT, port).apply()
+        _tcpServerPort.value = port
+    }
 
     fun isBackgroundExecutionEnabled(): Boolean {
         return prefs.getBoolean(KEY_BACKGROUND_EXECUTION, true)
@@ -47,10 +63,22 @@ class SettingsRepository(context: Context) {
     }
 
     companion object {
+        @Volatile
+        private var INSTANCE: SettingsRepository? = null
+
+        fun getInstance(context: Context): SettingsRepository {
+            return INSTANCE ?: synchronized(this) {
+                val instance = SettingsRepository(context.applicationContext)
+                INSTANCE = instance
+                instance
+            }
+        }
+
         private const val PREFS_NAME = "mqbl_settings"
         private const val KEY_BACKGROUND_EXECUTION = "background_execution_enabled"
-        // --- ▼▼▼ 감지 단어 저장을 위한 키 추가 ▼▼▼ ---
         private const val KEY_CUSTOM_KEYWORDS = "custom_detection_keywords"
-        // --- ▲▲▲ 감지 단어 저장을 위한 키 추가 끝 ▲▲▲ ---
+        private const val KEY_TCP_SERVER_IP = "tcp_server_ip"
+        private const val KEY_TCP_SERVER_PORT = "tcp_server_port"
     }
 }
+

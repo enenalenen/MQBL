@@ -38,30 +38,29 @@ class TcpViewModel(application: Application) : AndroidViewModel(application) {
         initialValue = defaultTcpUiState
     )
 
-    // ▼▼▼ IP/Port StateFlow 및 update 함수 제거됨 ▼▼▼
-
     init {
         Intent(application, CommunicationService::class.java).also { intent ->
             application.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
         }
     }
 
-    fun connect() {
-        // ▼▼▼ 여기에 IP 주소와 포트를 직접 입력하세요 ▼▼▼
-        val hardcodedIp = "192.168.0.5"
-        val hardcodedPort = 12345
-        // ▲▲▲ 여기에 IP 주소와 포트를 직접 입력하세요 ▲▲▲
-
-        Log.i(TAG, "UI Action: Request TCP connect to hardcoded address $hardcodedIp:$hardcodedPort")
-        _binder.value?.getService()?.requestTcpConnect(hardcodedIp, hardcodedPort)
+    // --- ▼▼▼ connect 함수가 IP와 Port를 받도록 수정 ▼▼▼ ---
+    fun connect(ip: String, port: Int) {
+        if (ip.isBlank() || port <= 0) {
+            Log.w(TAG, "Invalid IP or Port for connection.")
+            // Optionally update UI state to show an error
+            return
+        }
+        Log.i(TAG, "UI Action: Request TCP connect to $ip:$port")
+        _binder.value?.getService()?.requestTcpConnect(ip, port)
     }
+    // --- ▲▲▲ 수정 끝 ▲▲▲ ---
 
     fun disconnect() {
         Log.i(TAG, "UI Action: Request TCP disconnect")
         _binder.value?.getService()?.requestTcpDisconnect()
     }
 
-    // ▼▼▼ sendMessage 함수는 내부 통신용으로 유지 ▼▼▼
     fun sendMessage(message: String) {
         _binder.value?.getService()?.sendTcpMessage(message)
     }
@@ -76,3 +75,4 @@ class TcpViewModel(application: Application) : AndroidViewModel(application) {
         _binder.value = null
     }
 }
+

@@ -81,8 +81,6 @@ private val UART_TX_CHARACTERISTIC_UUID: UUID = UUID.fromString("6E400002-B5A3-F
 private val CLIENT_CHARACTERISTIC_CONFIG_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb") // Standard CCCD
 
 private const val MAX_DETECTION_LOG_SIZE = 10
-private const val DEFAULT_TCP_SERVER_IP = "192.168.0.18" // 기본 TCP 서버 IP
-private const val DEFAULT_TCP_SERVER_PORT = 12345       // 기본 TCP 서버 포트
 private const val MAX_TCP_LOG_SIZE = 50
 private const val WIFI_DIRECT_SERVER_PORT = 8888       // Wi-Fi Direct 소켓 통신 포트
 private const val MAX_WIFI_DIRECT_LOG_SIZE = 20
@@ -200,13 +198,11 @@ class CommunicationService : LifecycleService() {
 
     // TCP/IP
     private var tcpSocket: Socket? = null
-    // --- ▼▼▼ PrintWriter -> OutputStream으로 변경 ▼▼▼ ---
     private var tcpOutputStream: OutputStream? = null
-    // --- ▲▲▲ 변경 끝 ▲▲▲ ---
     private var tcpBufferedReader: BufferedReader? = null
     private var tcpReceiveJob: Job? = null
-    private var currentServerIp: String = DEFAULT_TCP_SERVER_IP
-    private var currentServerPort: Int = DEFAULT_TCP_SERVER_PORT
+    private var currentServerIp: String = ""
+    private var currentServerPort: Int = 0
     private val _tcpUiState = MutableStateFlow(TcpUiState(connectionStatus = "TCP/IP: 연결 끊김"))
     private val _receivedTcpMessages = MutableStateFlow<List<TcpMessageItem>>(emptyList())
 
@@ -224,7 +220,7 @@ class CommunicationService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         Log.i(TAG_SERVICE, "Service onCreate")
-        settingsRepository = SettingsRepository(this)
+        settingsRepository = SettingsRepository.getInstance(this)
 
         lifecycleScope.launch {
             // 초기 값 로드
@@ -239,7 +235,7 @@ class CommunicationService : LifecycleService() {
                 customKeywords = keywordsString.split(",")
                     .map { it.trim() }
                     .filter { it.isNotEmpty() }
-                Log.d(TAG_SERVICE, "Custom keywords updated: $customKeywords")
+                Log.d(TAG_SERVICE, "Custom keywords updated in Service: $customKeywords")
             }
         }
 
@@ -247,11 +243,8 @@ class CommunicationService : LifecycleService() {
         initializeBle()
         //initializeWifiDirect()
 
-        // --- ▼▼▼ Hub 리스너 변경 ▼▼▼ ---
-        listenForBleAudioToTcpMessages() // 오디오 스트림 리스너
-        listenForTcpToBleMessages()      // 서버 응답(텍스트) 리스너
-        // --- ▲▲▲ 변경 끝 ▲▲▲ ---
-
+        listenForBleAudioToTcpMessages()
+        listenForTcpToBleMessages()
         listenForWifiDirectToTcpMessages()
         listenForTcpToWifiDirectMessages()
 
@@ -648,14 +641,12 @@ class CommunicationService : LifecycleService() {
         writeCharacteristic(txCharacteristic!!, message.toByteArray(Charsets.UTF_8))
     }
 
-    // --- ▼▼▼ BLE 데이터 처리 로직 수정 ▼▼▼ ---
     private fun processBleAudioData(data: ByteArray) {
         lifecycleScope.launch {
             Log.d(TAG_BLE, "Forwarding ${data.size} bytes from BLE to Hub for TCP")
             CommunicationHub.emitBleAudioToTcp(data)
         }
     }
-    // --- ▲▲▲ 수정 끝 ▲▲▲ ---
 
     private fun updateBleDataLog(logEntry: String) {
         lifecycleScope.launch {
@@ -701,9 +692,7 @@ class CommunicationService : LifecycleService() {
                 tcpSocket?.connect(InetSocketAddress(currentServerIp, currentServerPort), SOCKET_TIMEOUT)
 
                 if (tcpSocket?.isConnected == true) {
-                    // --- ▼▼▼ OutputStream을 가져오도록 수정 ▼▼▼ ---
                     tcpOutputStream = tcpSocket!!.getOutputStream()
-                    // --- ▲▲▲ 수정 끝 ▲▲▲ ---
                     tcpBufferedReader = BufferedReader(InputStreamReader(tcpSocket!!.getInputStream()))
                     _tcpUiState.update { it.copy(isConnected = true, connectionStatus = "TCP/IP: 연결됨", errorMessage = null) }
                     Log.i(TAG_TCP, "TCP Connected to $currentServerIp:$currentServerPort")
@@ -778,7 +767,6 @@ class CommunicationService : LifecycleService() {
         }
     }
 
-    // --- ▼▼▼ 오디오(ByteArray) 전송을 위한 함수 추가 ▼▼▼ ---
     private fun sendTcpAudioData(data: ByteArray) {
         if (tcpSocket?.isConnected != true || tcpOutputStream == null) {
             Log.w(TAG_TCP, "Cannot send TCP audio data: Not connected.")
@@ -797,7 +785,6 @@ class CommunicationService : LifecycleService() {
             }
         }
     }
-    // --- ▲▲▲ 함수 추가 끝 ▲▲▲ ---
 
     private fun disconnectTcpInternal(userRequested: Boolean, reason: String? = null) {
         if (tcpSocket == null && !_tcpUiState.value.isConnected && !_tcpUiState.value.connectionStatus.contains("연결 중")) {
@@ -822,9 +809,7 @@ class CommunicationService : LifecycleService() {
     }
 
     private fun closeTcpSocketResources() {
-        // --- ▼▼▼ PrintWriter -> OutputStream으로 변경 ▼▼▼ ---
         try { tcpOutputStream?.close() } catch (e: IOException) { Log.e(TAG_TCP, "Error closing OutputStream", e) }
-        // --- ▲▲▲ 변경 끝 ▲▲▲ ---
         try { tcpBufferedReader?.close() } catch (e: IOException) { Log.e(TAG_TCP, "Error closing BufferedReader", e) }
         try { tcpSocket?.close() } catch (e: IOException) { Log.e(TAG_TCP, "Error closing socket", e) }
         tcpSocket = null
@@ -1002,7 +987,6 @@ class CommunicationService : LifecycleService() {
     }
 
     // --- Hub Listeners ---
-    // --- ▼▼▼ 오디오 스트림을 수신하여 TCP로 전송하는 리스너 추가 ▼▼▼ ---
     private fun listenForBleAudioToTcpMessages() {
         lifecycleScope.launch {
             CommunicationHub.bleAudioToTcpFlow.collect { audioData ->
@@ -1012,33 +996,44 @@ class CommunicationService : LifecycleService() {
             }
         }
     }
-    // --- ▲▲▲ 리스너 추가 끝 ▲▲▲ ---
 
     private fun listenForTcpToBleMessages() {
         lifecycleScope.launch {
             CommunicationHub.tcpToBleFlow.collect { message ->
                 Log.i(TAG_BLE, "Service received message from Hub (TCP->BLE): $message")
                 val trimmedMessage = message.trim()
-                var eventDescription: String? = null
-                when (trimmedMessage.lowercase()) {
-                    "siren" -> eventDescription = "사이렌 감지됨"
-                    "horn" -> eventDescription = "경적 감지됨"
-                    "boom" -> eventDescription = "폭발음 감지됨"
-                }
-                if (eventDescription != null) { addDetectionEvent(eventDescription) }
+                var shouldSendToBle = false
 
-                val detectedCustomKeyword = customKeywords.find { keyword ->
-                    trimmedMessage.contains(keyword, ignoreCase = true)
-                }
-                if (detectedCustomKeyword != null) {
-                    addCustomSoundEvent("'$detectedCustomKeyword' 단어 감지됨 (TCP)")
+                val isCustomKeyword = customKeywords.any { custom ->
+                    trimmedMessage.equals(custom, ignoreCase = true)
                 }
 
-                if (bluetoothGatt != null && txCharacteristic != null) {
-                    Log.d(TAG_BLE, "Service forwarding TCP message to BLE device.")
-                    writeCharacteristic(txCharacteristic!!, message.toByteArray(Charsets.UTF_8))
+                if (isCustomKeyword) {
+                    val customEventDescription = "'$trimmedMessage' 단어 감지됨"
+                    addCustomSoundEvent(customEventDescription)
+                    sendAlertNotification("음성 감지!", customEventDescription)
+                    shouldSendToBle = true
                 } else {
-                    Log.w(TAG_BLE, "Service cannot forward TCP message to BLE: Not connected.")
+                    var alarmEventDescription: String? = null
+                    when (trimmedMessage.lowercase()) {
+                        "siren" -> alarmEventDescription = "사이렌 감지됨"
+                        "horn" -> alarmEventDescription = "경적 감지됨"
+                        "boom" -> alarmEventDescription = "폭발음 감지됨"
+                    }
+
+                    if (alarmEventDescription != null) {
+                        addDetectionEvent(alarmEventDescription)
+                        sendAlertNotification("위험 감지!", alarmEventDescription)
+                        shouldSendToBle = true
+                    }
+                }
+
+                if (shouldSendToBle && bluetoothGatt != null && txCharacteristic != null) {
+                    val triggerCommand = "VIBRATE_TRIGGER"
+                    Log.d(TAG_BLE, "Service sending unified vibration trigger ('$triggerCommand') to BLE device.")
+                    writeCharacteristic(txCharacteristic!!, triggerCommand.toByteArray(Charsets.UTF_8))
+                } else if (shouldSendToBle) {
+                    Log.w(TAG_BLE, "Service cannot send trigger to BLE: Not connected.")
                 }
             }
         }
@@ -1196,13 +1191,9 @@ class CommunicationService : LifecycleService() {
             }
         }
 
-        // --- ▼▼▼ onCharacteristicChanged 로직 수정 ▼▼▼ ---
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
-            // 이제 value(ByteArray)를 문자열로 변환하지 않고 바로 처리합니다.
-            // Log.i(TAG_BLE, "Received notification: ${value.size} bytes from ${characteristic.uuid}")
             processBleAudioData(value)
         }
-        // --- ▲▲▲ 수정 끝 ▲▲▲ ---
 
         override fun onCharacteristicWrite(gatt: BluetoothGatt?, characteristic: BluetoothGattCharacteristic?, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
@@ -1571,9 +1562,10 @@ class CommunicationService : LifecycleService() {
 
     /**
      * 사용자에게 긴급 알림을 보냅니다.
+     * @param title 알림에 표시될 제목
      * @param contentText 알림에 표시될 메시지 (예: "사이렌이 감지되었습니다.")
      */
-    private fun sendAlertNotification(contentText: String) {
+    private fun sendAlertNotification(title: String, contentText: String) {
         val notificationIntent = Intent(this, MainActivity::class.java)
         val pendingIntentFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
@@ -1583,7 +1575,7 @@ class CommunicationService : LifecycleService() {
         val pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, pendingIntentFlags)
 
         val notification = NotificationCompat.Builder(this, ALERT_NOTIFICATION_CHANNEL_ID)
-            .setContentTitle("위험 감지!")
+            .setContentTitle(title) // 하드코딩된 제목 대신 파라미터 사용
             .setContentText(contentText)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
@@ -1593,7 +1585,7 @@ class CommunicationService : LifecycleService() {
 
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(ALERT_NOTIFICATION_ID, notification)
-        Log.i(TAG_SERVICE, "Alert notification sent: $contentText")
+        Log.i(TAG_SERVICE, "Alert notification sent: [$title] $contentText")
     }
 }
 
