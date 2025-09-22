@@ -32,7 +32,7 @@ fun SettingsScreen(
 
     // BLE
     bleUiState: BleUiState,
-    bondedDevices: List<BluetoothDevice>, // 파라미터는 유지하되 UI에서 사용 안 함
+    bondedDevices: List<BluetoothDevice>,
     scannedDevices: List<BluetoothDevice>,
     onDeviceSelected: (BluetoothDevice) -> Unit,
     onRequestBlePermissions: () -> Unit,
@@ -41,8 +41,12 @@ fun SettingsScreen(
     onStartScan: () -> Unit,
     onStopScan: () -> Unit,
     onPairDevice: (BluetoothDevice) -> Unit,
-
     onSendCommand: (String) -> Unit,
+
+    // --- ▼▼▼ 녹음 제어 함수 추가 ▼▼▼ ---
+    onStartRecording: () -> Unit,
+    onStopRecording: () -> Unit,
+    // --- ▲▲▲ 추가 끝 ▲▲▲ ---
 
     // TCP/IP
     tcpUiState: TcpUiState,
@@ -64,6 +68,40 @@ fun SettingsScreen(
         item {
             Text("연결 및 장치 설정", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(bottom = 16.dp))
         }
+
+        // --- ▼▼▼ 오디오 녹음 테스트 섹션 추가 ▼▼▼ ---
+        item {
+            Card(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("ESP32 오디오 녹음 테스트", style = MaterialTheme.typography.titleMedium)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "ESP32와 BLE로 연결된 상태에서 녹음을 시작하고 중지하면, 수신된 오디오가 스마트폰의 '다운로드' 폴더에 .wav 파일로 저장됩니다.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        Button(
+                            onClick = onStartRecording,
+                            enabled = !settingsUiState.isRecording && bleUiState.connectedDeviceName != null
+                        ) {
+                            Text("녹음 시작")
+                        }
+                        Button(
+                            onClick = onStopRecording,
+                            enabled = settingsUiState.isRecording
+                        ) {
+                            Text("중지 및 저장")
+                        }
+                    }
+                }
+            }
+        }
+        // --- ▲▲▲ 섹션 추가 끝 ▲▲▲ ---
 
         item {
             Card(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
@@ -168,7 +206,6 @@ fun SettingsScreen(
 
                         Spacer(modifier = Modifier.height(16.dp))
 
-                        // --- ▼▼▼ 진동 테스트 버튼 수정 ▼▼▼ ---
                         Text(
                             "진동 테스트 (수동 신호 전송)",
                             modifier = Modifier.align(Alignment.CenterHorizontally),
@@ -183,7 +220,6 @@ fun SettingsScreen(
                                 Text("진동")
                             }
                         }
-                        // --- ▲▲▲ 수정 끝 ▲▲▲ ---
                     }
                 }
             }
@@ -299,7 +335,7 @@ fun SettingsScreen(
 fun SettingsScreenPreview() {
     MaterialTheme {
         SettingsScreen(
-            settingsUiState = SettingsUiState(isBackgroundExecutionEnabled = true),
+            settingsUiState = SettingsUiState(isBackgroundExecutionEnabled = true, isRecording = true),
             onBackgroundExecutionToggled = {},
             bleUiState = BleUiState(status = "BLE 상태: 연결됨", connectedDeviceName = "미리보기 BLE 장치", isScanning = false),
             bondedDevices = emptyList(),
@@ -312,6 +348,8 @@ fun SettingsScreenPreview() {
             onStopScan = {},
             onPairDevice = {},
             onSendCommand = {},
+            onStartRecording = {},
+            onStopRecording = {},
             tcpUiState = TcpUiState(connectionStatus = "TCP/IP 상태: 미리보기", isConnected = true),
             tcpServerIp = "192.168.0.10",
             tcpServerPort = "6789",

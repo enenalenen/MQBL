@@ -101,53 +101,69 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
     val navController = rememberNavController()
-
     val context = LocalContext.current
-    var showNotificationPermissionDialog by remember { mutableStateOf(false) }
 
+    // --- ▼▼▼ ViewModel 인스턴스를 NavHost 바깥으로 이동 ▼▼▼ ---
+    // SettingsScreen과 NotificationsScreen이 동일한 ViewModel 인스턴스를 공유하도록 함
+    val bleViewModel: BleViewModel = viewModel()
+    val settingsViewModel: SettingsViewModel = viewModel()
+    val tcpViewModel: TcpViewModel = viewModel()
+
+    // --- ▼▼▼ 앱 시작 시 알림 권한만 별도로 요청 ▼▼▼ ---
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        val permissionLauncher = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.RequestPermission(),
             onResult = { isGranted ->
                 if (!isGranted) {
-                    showNotificationPermissionDialog = true
+                    // 사용자에게 권한이 왜 필요한지 설명하는 UI를 보여줄 수 있습니다.
+                    Log.w("MainAppNavigation", "Notification permission was denied.")
                 }
             }
         )
-
         LaunchedEffect(Unit) {
-            val permissionStatus = ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
-            if (permissionStatus == PackageManager.PERMISSION_DENIED) {
-                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
+    }
 
-        if (showNotificationPermissionDialog) {
-            AlertDialog(
-                onDismissRequest = { showNotificationPermissionDialog = false },
-                title = { Text("알림 권한 필요") },
-                text = { Text("위험 상황(사이렌, 경적 등)을 즉시 알려면 알림 권한이 반드시 필요합니다. 설정에서 권한을 허용해주세요.") },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                            val uri = Uri.fromParts("package", context.packageName, null)
-                            intent.data = uri
-                            context.startActivity(intent)
-                            showNotificationPermissionDialog = false
-                        }
-                    ) {
-                        Text("설정으로 이동")
-                    }
-                },
-                dismissButton = {
-                    Button(onClick = { showNotificationPermissionDialog = false }) {
-                        Text("닫기")
-                    }
+    // --- ▼▼▼ ViewModel의 권한 요청 이벤트를 구독하여 처리하는 로직으로 복원 및 개선 ▼▼▼ ---
+    LaunchedEffect(key1 = bleViewModel) {
+        bleViewModel.permissionRequestEvent.collectLatest {
+            Log.d("MainActivity", "Permission request event received from BleViewModel.")
+
+            val permissionsToRequest = mutableListOf<String>()
+
+            // 1. BLE 권한 추가 (버전별로 올바르게 분기)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                permissionsToRequest.add(Manifest.permission.BLUETOOTH_CONNECT)
+                permissionsToRequest.add(Manifest.permission.BLUETOOTH_SCAN)
+                permissionsToRequest.add(Manifest.permission.ACCESS_FINE_LOCATION) // 스캔을 위해 위치 권한도 함께 요청
+            } else {
+                permissionsToRequest.add(Manifest.permission.ACCESS_FINE_LOCATION)
+            }
+
+            // 2. 파일 쓰기 권한 추가 (안드로이드 9 이하)
+            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+                if (ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                    permissionsToRequest.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
                 }
-            )
+            }
+
+            // 이미 허용된 권한은 제외하고, 실제로 요청이 필요한 권한만 추림
+            val permissionsToActuallyRequest = permissionsToRequest.filter {
+                ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+            }.toTypedArray()
+
+
+            if (permissionsToActuallyRequest.isNotEmpty()) {
+                Log.d("MainActivity", "Requesting permissions: ${permissionsToActuallyRequest.joinToString()}")
+                requestPermissions(permissionsToActuallyRequest)
+            }
         }
     }
+    // --- ▲▲▲ 로직 수정 끝 ▲▲▲ ---
+
 
     Scaffold(
         bottomBar = {
@@ -177,7 +193,7 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
             modifier = Modifier.padding(innerPadding)
         ) {
             composable(Screen.Notifications.route) {
-                val bleViewModel: BleViewModel = viewModel()
+                // 공유된 ViewModel 사용
                 val uiState by bleViewModel.uiState.collectAsStateWithLifecycle()
                 val bondedDevices by bleViewModel.bondedDevices.collectAsStateWithLifecycle()
                 val detectionLog by bleViewModel.detectionEventLog.collectAsStateWithLifecycle()
@@ -196,39 +212,19 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
             }
 
             composable(Screen.Settings.route) {
-                val settingsViewModel: SettingsViewModel = viewModel()
+                // 공유된 ViewModel 사용
                 val settingsUiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
                 val customKeywords by settingsViewModel.customKeywords.collectAsStateWithLifecycle()
 
-                val bleViewModel: BleViewModel = viewModel()
                 val bleUiState by bleViewModel.uiState.collectAsStateWithLifecycle()
                 val bondedDevices by bleViewModel.bondedDevices.collectAsStateWithLifecycle()
                 val scannedDevices by bleViewModel.scannedDevices.collectAsStateWithLifecycle()
 
-                val tcpViewModel: TcpViewModel = viewModel()
                 val tcpUiState by tcpViewModel.tcpUiState.collectAsStateWithLifecycle()
-
                 val tcpServerIp by settingsViewModel.tcpServerIp.collectAsStateWithLifecycle()
                 val tcpServerPort by settingsViewModel.tcpServerPort.collectAsStateWithLifecycle()
 
-                LaunchedEffect(key1 = bleViewModel) {
-                    bleViewModel.permissionRequestEvent.collectLatest {
-                        Log.d("SettingsScreen", "BLE Permission request event received, launching dialog.")
-                        val permissionsToRequest = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                            arrayOf(
-                                Manifest.permission.BLUETOOTH_CONNECT,
-                                Manifest.permission.BLUETOOTH_SCAN,
-                                Manifest.permission.ACCESS_FINE_LOCATION
-                            )
-                        } else {
-                            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
-                        }
-                        if (permissionsToRequest.isNotEmpty()) {
-                            requestPermissions(permissionsToRequest)
-                        }
-                    }
-                }
-
+                // --- ▼▼▼ 화면이 다시 보일 때마다 권한을 다시 체크하도록 수정 ▼▼▼ ---
                 val lifecycleOwner = LocalLifecycleOwner.current
                 DisposableEffect(lifecycleOwner, bleViewModel) {
                     val observer = LifecycleEventObserver { _, event ->
@@ -242,9 +238,9 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
                         lifecycleOwner.lifecycle.removeObserver(observer)
                     }
                 }
+                // --- ▲▲▲ 수정 끝 ▲▲▲ ---
 
                 SettingsScreen(
-                    // App Settings
                     settingsUiState = settingsUiState,
                     onBackgroundExecutionToggled = settingsViewModel::toggleBackgroundExecution,
 
@@ -252,14 +248,6 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
                     onCustomKeywordsChange = settingsViewModel::updateCustomKeywords,
                     onSaveCustomKeywords = settingsViewModel::saveCustomKeywords,
 
-                    // TCP Settings
-                    tcpServerIp = tcpServerIp,
-                    onTcpServerIpChange = settingsViewModel::onTcpServerIpChange,
-                    tcpServerPort = tcpServerPort,
-                    onTcpServerPortChange = settingsViewModel::onTcpServerPortChange,
-                    onSaveTcpSettings = settingsViewModel::saveTcpSettings,
-
-                    // BLE
                     bleUiState = bleUiState,
                     bondedDevices = bondedDevices,
                     scannedDevices = scannedDevices,
@@ -272,16 +260,16 @@ fun MainAppNavigation(requestPermissions: (Array<String>) -> Unit) {
                     onPairDevice = bleViewModel::pairWithDevice,
                     onSendCommand = bleViewModel::sendBleCommand,
 
-                    // TCP Connection
+                    onStartRecording = settingsViewModel::startRecording,
+                    onStopRecording = settingsViewModel::stopRecording,
+
                     tcpUiState = tcpUiState,
-                    // --- ▼▼▼ 이 부분 수정 ▼▼▼ ---
-                    onTcpConnect = {
-                        val port = tcpServerPort.toIntOrNull()
-                        if (port != null) {
-                            tcpViewModel.connect(tcpServerIp, port)
-                        }
-                    },
-                    // --- ▲▲▲ 수정 끝 ▲▲▲ ---
+                    tcpServerIp = tcpServerIp,
+                    tcpServerPort = tcpServerPort,
+                    onTcpServerIpChange = settingsViewModel::onTcpServerIpChange,
+                    onTcpServerPortChange = settingsViewModel::onTcpServerPortChange,
+                    onSaveTcpSettings = settingsViewModel::saveTcpSettings,
+                    onTcpConnect = { tcpViewModel.connect(tcpServerIp, tcpServerPort.toIntOrNull() ?: 0) },
                     onTcpDisconnect = tcpViewModel::disconnect
                 )
             }

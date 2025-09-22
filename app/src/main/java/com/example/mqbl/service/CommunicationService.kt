@@ -11,6 +11,7 @@ import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.content.BroadcastReceiver
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -22,9 +23,12 @@ import android.net.wifi.p2p.WifiP2pInfo
 import android.net.wifi.p2p.WifiP2pManager
 import android.os.Binder
 import android.os.Build
+import android.os.Environment
 import android.os.IBinder
 import android.os.Looper
+import android.provider.MediaStore
 import android.util.Log
+import android.widget.Toast
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -52,6 +56,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.io.ByteArrayOutputStream
 import java.io.BufferedReader
 import java.io.IOException
 import java.io.InputStream
@@ -61,6 +66,8 @@ import java.io.PrintWriter
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -106,6 +113,7 @@ class CommunicationService : LifecycleService() {
         fun getBondedDevicesFlow(): StateFlow<List<BluetoothDevice>> = _bondedDevices.asStateFlow()
         fun getDetectionLogFlow(): StateFlow<List<DetectionEvent>> = _detectionEventLog.asStateFlow()
         fun getScannedDevicesFlow(): StateFlow<List<BluetoothDevice>> = _scannedDevices.asStateFlow()
+        fun getIsRecordingFlow(): StateFlow<Boolean> = _isRecording.asStateFlow()
         // TCP
         fun getTcpUiStateFlow(): StateFlow<TcpUiState> = _tcpUiState.asStateFlow()
         fun getReceivedTcpMessagesFlow(): StateFlow<List<TcpMessageItem>> = _receivedTcpMessages.asStateFlow()
@@ -122,7 +130,6 @@ class CommunicationService : LifecycleService() {
     // BLE
     private lateinit var bluetoothManager: BluetoothManager
     private var bluetoothAdapter: BluetoothAdapter? = null
-    // --- GATT 관련 변수 추가 ---
     private var bluetoothGatt: BluetoothGatt? = null
     private var txCharacteristic: BluetoothGattCharacteristic? = null
     private var rxCharacteristic: BluetoothGattCharacteristic? = null
@@ -135,6 +142,11 @@ class CommunicationService : LifecycleService() {
     private var bleScanner: BluetoothLeScanner? = null
     private val _scannedDevices = MutableStateFlow<List<BluetoothDevice>>(emptyList())
     private var isScanning = false
+
+    // 녹음 관련 변수
+    private val _isRecording = MutableStateFlow(false)
+    private var audioRecordingStream: ByteArrayOutputStream? = null
+
 
     // 페어링(Bonding) 상태 변화 감지 리시버
     private val bondStateReceiver = object : BroadcastReceiver() {
@@ -239,14 +251,19 @@ class CommunicationService : LifecycleService() {
             }
         }
 
+        lifecycleScope.launch {
+            settingsRepository.tcpServerIpFlow.collect { ip -> currentServerIp = ip }
+        }
+        lifecycleScope.launch {
+            settingsRepository.tcpServerPortFlow.collect { portString ->
+                currentServerPort = portString.toIntOrNull() ?: 0
+            }
+        }
+
+
         createNotificationChannel()
         initializeBle()
-        //initializeWifiDirect()
-
-        listenForBleAudioToTcpMessages()
         listenForTcpToBleMessages()
-        listenForWifiDirectToTcpMessages()
-        listenForTcpToWifiDirectMessages()
 
 
         val filter = IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
@@ -269,11 +286,13 @@ class CommunicationService : LifecycleService() {
                 stopSelf()
             }
             else -> {
-                if (settingsRepository.isBackgroundExecutionEnabled()) {
-                    startForeground(NOTIFICATION_ID, createNotification("서비스 실행 중..."))
-                    Log.i(TAG_SERVICE, "Service started, background execution is ENABLED.")
-                } else {
-                    Log.i(TAG_SERVICE, "Service started, background execution is DISABLED.")
+                lifecycleScope.launch {
+                    if (settingsRepository.isBackgroundExecutionEnabledFlow.first()) {
+                        startForeground(NOTIFICATION_ID, createNotification("서비스 실행 중..."))
+                        Log.i(TAG_SERVICE, "Service started, background execution is ENABLED.")
+                    } else {
+                        Log.i(TAG_SERVICE, "Service started, background execution is DISABLED.")
+                    }
                 }
             }
         }
@@ -295,8 +314,6 @@ class CommunicationService : LifecycleService() {
         Log.w(TAG_SERVICE, "Service onDestroy")
         disconnectBle()
         disconnectTcpInternal(userRequested = false)
-        //unregisterWifiDirectReceiver()
-        //disconnectWifiDirect(notifyUi = false)
 
         unregisterReceiver(bondStateReceiver)
         stopBleScan()
@@ -520,6 +537,41 @@ class CommunicationService : LifecycleService() {
         device.createBond()
     }
 
+    fun startAudioRecording() {
+        if (_bleUiState.value.connectedDeviceName == null) {
+            showToast("ESP32가 연결되지 않아 녹음을 시작할 수 없습니다.")
+            return
+        }
+        if (_isRecording.value) {
+            showToast("이미 녹음이 진행 중입니다.")
+            return
+        }
+        audioRecordingStream = ByteArrayOutputStream()
+        _isRecording.value = true
+        showToast("오디오 녹음을 시작합니다.")
+        Log.i(TAG_SERVICE, "Audio recording started.")
+    }
+
+    fun stopAndSaveAudioRecording() {
+        if (!_isRecording.value) {
+            showToast("녹음 중이 아닙니다.")
+            return
+        }
+        val audioData = audioRecordingStream?.toByteArray()
+        _isRecording.value = false
+        audioRecordingStream = null
+
+        if (audioData != null && audioData.isNotEmpty()) {
+            lifecycleScope.launch(Dispatchers.IO) {
+                saveAsWavFile(audioData)
+            }
+            Log.i(TAG_SERVICE, "Audio recording stopped. Saving file in background...")
+        } else {
+            showToast("녹음된 오디오 데이터가 없습니다.")
+            Log.w(TAG_SERVICE, "Audio recording stopped but no data was captured.")
+        }
+    }
+
     // --- BLE Private Methods ---
     private fun initializeBle() {
         Log.d(TAG_BLE, "Initializing BLE...")
@@ -613,6 +665,8 @@ class CommunicationService : LifecycleService() {
         if (bluetoothGatt == null && !_bleUiState.value.isConnecting && _bleUiState.value.connectedDeviceName == null) return
         Log.i(TAG_BLE, "Disconnecting BLE GATT connection...")
 
+        stopAndSaveAudioRecording()
+
         bluetoothGatt?.close()
         bluetoothGatt = null
         txCharacteristic = null
@@ -642,9 +696,8 @@ class CommunicationService : LifecycleService() {
     }
 
     private fun processBleAudioData(data: ByteArray) {
-        lifecycleScope.launch {
-            Log.d(TAG_BLE, "Forwarding ${data.size} bytes from BLE to Hub for TCP")
-            CommunicationHub.emitBleAudioToTcp(data)
+        if (_isRecording.value) {
+            audioRecordingStream?.write(data)
         }
     }
 
@@ -724,8 +777,6 @@ class CommunicationService : LifecycleService() {
 
                         Log.d(TAG_TCP, "Forwarding TCP message to Hub for BLE: $line")
                         CommunicationHub.emitTcpToBle(line)
-                        Log.d(TAG_TCP, "Forwarding TCP message to Hub for Wi-Fi Direct: $line")
-                        CommunicationHub.emitTcpToWifiDirect(line)
                     } else {
                         Log.w(TAG_TCP, "TCP readLine returned null, server might have closed connection.")
                         break
@@ -752,7 +803,6 @@ class CommunicationService : LifecycleService() {
         }
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                // 텍스트 전송을 위해 끝에 개행 문자를 추가합니다.
                 val dataToSend = (message + "\n").toByteArray(Charsets.UTF_8)
                 tcpOutputStream?.write(dataToSend)
                 tcpOutputStream?.flush()
@@ -763,25 +813,6 @@ class CommunicationService : LifecycleService() {
                 Log.e(TAG_TCP, "TCP Send Error", e)
                 _tcpUiState.update { it.copy(errorMessage = "TCP 메시지 전송 오류: ${e.message}") }
                 disconnectTcpInternal(userRequested = false, "전송 중 연결 끊김")
-            }
-        }
-    }
-
-    private fun sendTcpAudioData(data: ByteArray) {
-        if (tcpSocket?.isConnected != true || tcpOutputStream == null) {
-            Log.w(TAG_TCP, "Cannot send TCP audio data: Not connected.")
-            return // UI 에러 표시는 너무 빈번할 수 있으므로 로그만 남김
-        }
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                tcpOutputStream?.write(data)
-                tcpOutputStream?.flush()
-                // 오디오 데이터는 너무 커서 로그에는 크기만 남김
-                // Log.d(TAG_TCP, "TCP Sent (Audio): ${data.size} bytes")
-            } catch (e: Exception) {
-                Log.e(TAG_TCP, "TCP Audio Send Error", e)
-                _tcpUiState.update { it.copy(errorMessage = "TCP 오디오 전송 오류: ${e.message}") }
-                disconnectTcpInternal(userRequested = false, "오디오 전송 중 연결 끊김")
             }
         }
     }
@@ -987,44 +1018,41 @@ class CommunicationService : LifecycleService() {
     }
 
     // --- Hub Listeners ---
-    private fun listenForBleAudioToTcpMessages() {
-        lifecycleScope.launch {
-            CommunicationHub.bleAudioToTcpFlow.collect { audioData ->
-                if (_tcpUiState.value.isConnected) {
-                    sendTcpAudioData(audioData)
-                }
-            }
-        }
-    }
-
     private fun listenForTcpToBleMessages() {
         lifecycleScope.launch {
             CommunicationHub.tcpToBleFlow.collect { message ->
                 Log.i(TAG_BLE, "Service received message from Hub (TCP->BLE): $message")
                 val trimmedMessage = message.trim()
+                val receivedKeywords = trimmedMessage.split(',').map { it.trim() }.filter { it.isNotEmpty() }
                 var shouldSendToBle = false
 
-                val isCustomKeyword = customKeywords.any { custom ->
-                    trimmedMessage.equals(custom, ignoreCase = true)
-                }
-
-                if (isCustomKeyword) {
-                    val customEventDescription = "'$trimmedMessage' 단어 감지됨"
-                    addCustomSoundEvent(customEventDescription)
-                    sendAlertNotification("음성 감지!", customEventDescription)
-                    shouldSendToBle = true
-                } else {
-                    var alarmEventDescription: String? = null
-                    when (trimmedMessage.lowercase()) {
-                        "siren" -> alarmEventDescription = "사이렌 감지됨"
-                        "horn" -> alarmEventDescription = "경적 감지됨"
-                        "boom" -> alarmEventDescription = "폭발음 감지됨"
+                // Process each keyword received from the server
+                receivedKeywords.forEach { receivedKeyword ->
+                    // Check if the received keyword is one of the user-defined keywords
+                    val isCustomKeyword = customKeywords.any { custom ->
+                        receivedKeyword.equals(custom, ignoreCase = true)
                     }
 
-                    if (alarmEventDescription != null) {
-                        addDetectionEvent(alarmEventDescription)
-                        sendAlertNotification("위험 감지!", alarmEventDescription)
+                    if (isCustomKeyword) {
+                        // It's a custom keyword
+                        val customEventDescription = "'$receivedKeyword' 단어 감지됨"
+                        addCustomSoundEvent(customEventDescription)
+                        sendAlertNotification("음성 감지!", customEventDescription)
                         shouldSendToBle = true
+                    } else {
+                        // If not a custom keyword, check if it's a default alarm keyword
+                        var alarmEventDescription: String? = null
+                        when (receivedKeyword.lowercase()) {
+                            "siren" -> alarmEventDescription = "사이렌 감지됨"
+                            "horn" -> alarmEventDescription = "경적 감지됨"
+                            "boom" -> alarmEventDescription = "폭발음 감지됨"
+                        }
+
+                        if (alarmEventDescription != null) {
+                            addDetectionEvent(alarmEventDescription)
+                            sendAlertNotification("위험 감지!", alarmEventDescription)
+                            shouldSendToBle = true
+                        }
                     }
                 }
 
@@ -1069,15 +1097,17 @@ class CommunicationService : LifecycleService() {
 
     // --- Notification ---
     private fun updateNotificationCombined() {
-        if (!settingsRepository.isBackgroundExecutionEnabled()) return
+        lifecycleScope.launch {
+            if (!settingsRepository.isBackgroundExecutionEnabledFlow.first()) return@launch
 
-        val bleStatus = _bleUiState.value.connectedDeviceName ?: "끊김"
-        val tcpStatusText = _tcpUiState.value.connectionStatus.replace("TCP/IP: ", "")
-        val wdUiState = _wifiDirectUiState.value
-        val wdStatus = wdUiState.connectedDeviceName ?: wdUiState.statusText.replace("Wi-Fi Direct: ", "")
+            val bleStatus = _bleUiState.value.connectedDeviceName ?: "끊김"
+            val tcpStatusText = _tcpUiState.value.connectionStatus.replace("TCP/IP: ", "")
+            val wdUiState = _wifiDirectUiState.value
+            val wdStatus = wdUiState.connectedDeviceName ?: wdUiState.statusText.replace("Wi-Fi Direct: ", "")
 
-        val contentText = "BLE: $bleStatus, TCP: $tcpStatusText, WD: $wdStatus"
-        updateNotification(contentText)
+            val contentText = "BLE: $bleStatus, TCP: $tcpStatusText, WD: $wdStatus"
+            updateNotification(contentText)
+        }
     }
 
     private fun createNotificationChannel() {
@@ -1110,7 +1140,6 @@ class CommunicationService : LifecycleService() {
         } else {
             PendingIntent.FLAG_UPDATE_CURRENT
         }
-
         val pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, pendingIntentFlags)
 
         return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
@@ -1135,7 +1164,6 @@ class CommunicationService : LifecycleService() {
         override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
             val deviceName = gatt?.device?.name ?: "Unknown Device"
 
-            // 상세한 로그 추가
             Log.d(TAG_BLE, "onConnectionStateChange received for $deviceName:")
             Log.d(TAG_BLE, "  - Status: ${gattStatusToString(status)}")
             Log.d(TAG_BLE, "  - New State: ${connectionStateToString(newState)}")
@@ -1155,7 +1183,6 @@ class CommunicationService : LifecycleService() {
                     connectionLost()
                 }
             } else {
-                // GATT_SUCCESS가 아닌 모든 경우를 에러로 처리
                 Log.e(TAG_BLE, "GATT Error on connection state change for $deviceName.")
                 connectionLost(errorMsg = "GATT 오류: ${gattStatusToString(status)}")
             }
@@ -1281,7 +1308,6 @@ class CommunicationService : LifecycleService() {
         disconnectBle()
     }
 
-    // --- 디버깅용 Helper 함수 추가 ---
     private fun gattStatusToString(status: Int): String {
         return when (status) {
             BluetoothGatt.GATT_SUCCESS -> "GATT_SUCCESS (0)"
@@ -1291,7 +1317,7 @@ class CommunicationService : LifecycleService() {
             BluetoothGatt.GATT_INSUFFICIENT_AUTHENTICATION -> "GATT_INSUFFICIENT_AUTHENTICATION (5)"
             BluetoothGatt.GATT_INSUFFICIENT_ENCRYPTION -> "GATT_INSUFFICIENT_ENCRYPTION (15)"
             BluetoothGatt.GATT_INVALID_ATTRIBUTE_LENGTH -> "GATT_INVALID_ATTRIBUTE_LENGTH (13)"
-            133 -> "GATT_ERROR (133)" // 가장 흔한 일반 오류
+            133 -> "GATT_ERROR (133)"
             8 -> "GATT_CONN_TIMEOUT (8)"
             19 -> "GATT_CONN_TERMINATE_PEER_USER (19)"
             else -> "Unknown Status ($status)"
@@ -1319,7 +1345,6 @@ class CommunicationService : LifecycleService() {
         }
     }
 
-    // --- Wi-Fi Direct BroadcastReceiver (Inner Class) ---
     inner class WiFiDirectBroadcastReceiver(
         private val manager: WifiP2pManager,
         private val channel: WifiP2pManager.Channel,
@@ -1431,7 +1456,6 @@ class CommunicationService : LifecycleService() {
     }
 
 
-    // --- Wi-Fi Direct Data Transfer Thread (Inner Class) ---
     private inner class WifiDirectDataTransferThread(private val p2pInfo: WifiP2pInfo) : Thread() {
         private var serverSocket: ServerSocket? = null
         private var clientSocket: Socket? = null
@@ -1560,11 +1584,6 @@ class CommunicationService : LifecycleService() {
         }
     }
 
-    /**
-     * 사용자에게 긴급 알림을 보냅니다.
-     * @param title 알림에 표시될 제목
-     * @param contentText 알림에 표시될 메시지 (예: "사이렌이 감지되었습니다.")
-     */
     private fun sendAlertNotification(title: String, contentText: String) {
         val notificationIntent = Intent(this, MainActivity::class.java)
         val pendingIntentFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -1575,7 +1594,7 @@ class CommunicationService : LifecycleService() {
         val pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, pendingIntentFlags)
 
         val notification = NotificationCompat.Builder(this, ALERT_NOTIFICATION_CHANNEL_ID)
-            .setContentTitle(title) // 하드코딩된 제목 대신 파라미터 사용
+            .setContentTitle(title)
             .setContentText(contentText)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
@@ -1586,6 +1605,91 @@ class CommunicationService : LifecycleService() {
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(ALERT_NOTIFICATION_ID, notification)
         Log.i(TAG_SERVICE, "Alert notification sent: [$title] $contentText")
+    }
+
+    private fun saveAsWavFile(pcmData: ByteArray) {
+        val resolver = applicationContext.contentResolver
+        val audioCollection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        } else {
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+        }
+
+        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        val details = ContentValues().apply {
+            put(MediaStore.Audio.Media.DISPLAY_NAME, "recorded_audio_$timestamp.wav")
+            put(MediaStore.Audio.Media.MIME_TYPE, "audio/wav")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.Audio.Media.RELATIVE_PATH, Environment.DIRECTORY_MUSIC)
+                put(MediaStore.Audio.Media.IS_PENDING, 1)
+            }
+        }
+
+        val audioUri = resolver.insert(audioCollection, details)
+
+        if (audioUri == null) {
+            Log.e(TAG_SERVICE, "Failed to create new MediaStore record.")
+            showToast("오디오 파일 생성에 실패했습니다.")
+            return
+        }
+
+        try {
+            resolver.openOutputStream(audioUri)?.use { outputStream ->
+                val header = createWavHeader(pcmData.size)
+                outputStream.write(header)
+                outputStream.write(pcmData)
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                details.clear()
+                details.put(MediaStore.Audio.Media.IS_PENDING, 0)
+                resolver.update(audioUri, details, null, null)
+            }
+            showToast("'Music' 폴더에 오디오 파일이 저장되었습니다.")
+
+        } catch (e: IOException) {
+            Log.e(TAG_SERVICE, "Error writing WAV file", e)
+            showToast("오디오 파일 저장 중 오류가 발생했습니다.")
+        }
+    }
+
+    private fun createWavHeader(dataSize: Int): ByteArray {
+        val headerSize = 44
+        val totalSize = dataSize + headerSize - 8
+        val sampleRate = 8000
+        val channels = 1
+        val bitsPerSample = 16
+        val byteRate = sampleRate * channels * bitsPerSample / 8
+
+        val header = ByteBuffer.allocate(headerSize)
+        header.order(ByteOrder.LITTLE_ENDIAN)
+
+        // RIFF chunk
+        header.put("RIFF".toByteArray(Charsets.US_ASCII))
+        header.putInt(totalSize)
+        header.put("WAVE".toByteArray(Charsets.US_ASCII))
+
+        // FMT sub-chunk
+        header.put("fmt ".toByteArray(Charsets.US_ASCII))
+        header.putInt(16) // Sub-chunk size
+        header.putShort(1) // Audio format (1 for PCM)
+        header.putShort(channels.toShort())
+        header.putInt(sampleRate)
+        header.putInt(byteRate)
+        header.putShort((channels * bitsPerSample / 8).toShort()) // Block align
+        header.putShort(bitsPerSample.toShort())
+
+        // DATA sub-chunk
+        header.put("data".toByteArray(Charsets.US_ASCII))
+        header.putInt(dataSize)
+
+        return header.array()
+    }
+
+    private fun showToast(message: String) {
+        lifecycleScope.launch(Dispatchers.Main) {
+            Toast.makeText(applicationContext, message, Toast.LENGTH_SHORT).show()
+        }
     }
 }
 

@@ -26,16 +26,24 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     private val settingsRepository = SettingsRepository.getInstance(application)
 
+    // --- ▼▼▼ CommunicationService 바인딩 로직 추가 ▼▼▼ ---
     private val _binder = MutableStateFlow<CommunicationService.LocalBinder?>(null)
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-            _binder.value = service as? CommunicationService.LocalBinder
+            val binder = service as? CommunicationService.LocalBinder
+            _binder.value = binder
+            // --- ▼▼▼ 서비스 연결 시 녹음 상태 구독 시작 ▼▼▼ ---
+            binder?.getIsRecordingFlow()?.onEach { isRecording ->
+                _uiState.update { it.copy(isRecording = isRecording) }
+            }?.launchIn(viewModelScope)
+            // --- ▲▲▲ 구독 끝 ▲▲▲ ---
         }
         override fun onServiceDisconnected(name: ComponentName?) {
             _binder.value = null
         }
     }
+    // --- ▲▲▲ 바인딩 로직 추가 끝 ▲▲▲ ---
 
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState = _uiState.asStateFlow()
@@ -43,17 +51,20 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private val _customKeywords = MutableStateFlow("")
     val customKeywords = _customKeywords.asStateFlow()
 
+    // --- ▼▼▼ TCP IP/Port 상태 추가 ▼▼▼ ---
     private val _tcpServerIp = MutableStateFlow("")
     val tcpServerIp = _tcpServerIp.asStateFlow()
 
     private val _tcpServerPort = MutableStateFlow("")
     val tcpServerPort = _tcpServerPort.asStateFlow()
-
+    // --- ▲▲▲ 상태 추가 끝 ▲▲▲ ---
 
     init {
+        // --- ▼▼▼ 서비스 바인딩 시작 ▼▼▼ ---
         Intent(application, CommunicationService::class.java).also { intent ->
             application.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
         }
+        // --- ▲▲▲ 바인딩 시작 끝 ▲▲▲ ---
 
         settingsRepository.isBackgroundExecutionEnabledFlow
             .onEach { isEnabled ->
@@ -67,35 +78,26 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             }
             .launchIn(viewModelScope)
 
+        // --- ▼▼▼ TCP IP/Port 구독 추가 ▼▼▼ ---
         settingsRepository.tcpServerIpFlow
-            .onEach { ip ->
-                _tcpServerIp.value = ip
-            }
+            .onEach { ip -> _tcpServerIp.value = ip }
             .launchIn(viewModelScope)
 
         settingsRepository.tcpServerPortFlow
-            .onEach { port ->
-                _tcpServerPort.value = port
-            }
+            .onEach { port -> _tcpServerPort.value = port }
             .launchIn(viewModelScope)
+        // --- ▲▲▲ 구독 추가 끝 ▲▲▲ ---
     }
 
-    fun onTcpServerIpChange(ip: String) {
-        _tcpServerIp.value = ip
+    // --- ▼▼▼ 녹음 제어 함수 추가 ▼▼▼ ---
+    fun startRecording() {
+        _binder.value?.getService()?.startAudioRecording()
     }
 
-    fun onTcpServerPortChange(port: String) {
-        _tcpServerPort.value = port
+    fun stopRecording() {
+        _binder.value?.getService()?.stopAndSaveAudioRecording()
     }
-
-    fun saveTcpSettings() {
-        viewModelScope.launch {
-            settingsRepository.setTcpServerIp(_tcpServerIp.value)
-            settingsRepository.setTcpServerPort(_tcpServerPort.value)
-            Toast.makeText(getApplication(), "TCP/IP 설정이 저장되었습니다.", Toast.LENGTH_SHORT).show()
-        }
-    }
-
+    // --- ▲▲▲ 함수 추가 끝 ▲▲▲ ---
 
     fun updateCustomKeywords(keywords: String) {
         _customKeywords.value = keywords
@@ -118,6 +120,24 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             }
         }
     }
+
+    // --- ▼▼▼ TCP IP/Port 업데이트 및 저장 함수 추가 ▼▼▼ ---
+    fun onTcpServerIpChange(ip: String) {
+        _tcpServerIp.value = ip
+    }
+
+    fun onTcpServerPortChange(port: String) {
+        _tcpServerPort.value = port
+    }
+
+    fun saveTcpSettings() {
+        viewModelScope.launch {
+            settingsRepository.setTcpServerIp(_tcpServerIp.value)
+            settingsRepository.setTcpServerPort(_tcpServerPort.value)
+            Toast.makeText(getApplication(), "서버 주소가 저장되었습니다.", Toast.LENGTH_SHORT).show()
+        }
+    }
+    // --- ▲▲▲ 함수 추가 끝 ▲▲▲ ---
 
     fun toggleBackgroundExecution(enabled: Boolean) {
         viewModelScope.launch {

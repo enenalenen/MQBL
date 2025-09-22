@@ -3,6 +3,10 @@
     xmlns:tools="http://schemas.android.com/tools"
     package="com.example.mqbl">
 
+    <!-- ▼▼▼ 파일 쓰기 권한 추가 (안드로이드 9 이하 버전 호환용) ▼▼▼ -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+    <!-- ▲▲▲ 권한 추가 끝 ▲▲▲ -->
+
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
@@ -34,7 +38,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.MQBL"
-        tools:targetApi="33"> {/* targetApi를 33 이상으로 설정 권장 */}
+        tools:targetApi="33">
 
         <activity
             android:name=".MainActivity"
@@ -55,3 +59,4 @@
     </application>
 
 </manifest>
+
