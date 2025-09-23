@@ -26,6 +26,12 @@ class SettingsRepository private constructor(context: Context) {
     private val _tcpServerPort = MutableStateFlow(getTcpServerPort())
     val tcpServerPortFlow: StateFlow<String> = _tcpServerPort.asStateFlow()
 
+    private val _esp32Ip = MutableStateFlow(getEsp32Ip())
+    val esp32IpFlow: StateFlow<String> = _esp32Ip.asStateFlow()
+
+    private val _esp32Port = MutableStateFlow(getEsp32Port())
+    val esp32PortFlow: StateFlow<String> = _esp32Port.asStateFlow()
+
     fun getCustomKeywords(): String {
         return prefs.getString(KEY_CUSTOM_KEYWORDS, "") ?: ""
     }
@@ -51,6 +57,24 @@ class SettingsRepository private constructor(context: Context) {
     fun setTcpServerPort(port: String) {
         prefs.edit().putString(KEY_TCP_SERVER_PORT, port).apply()
         _tcpServerPort.value = port
+    }
+
+    fun getEsp32Ip(): String {
+        return prefs.getString(KEY_ESP32_IP, "192.168.43.101") ?: "192.168.43.101"
+    }
+
+    fun setEsp32Ip(ip: String) {
+        prefs.edit().putString(KEY_ESP32_IP, ip).apply()
+        _esp32Ip.value = ip
+    }
+
+    fun getEsp32Port(): String {
+        return prefs.getString(KEY_ESP32_PORT, "8080") ?: "8080"
+    }
+
+    fun setEsp32Port(port: String) {
+        prefs.edit().putString(KEY_ESP32_PORT, port).apply()
+        _esp32Port.value = port
     }
 
     fun isBackgroundExecutionEnabled(): Boolean {
@@ -79,6 +103,8 @@ class SettingsRepository private constructor(context: Context) {
         private const val KEY_CUSTOM_KEYWORDS = "custom_detection_keywords"
         private const val KEY_TCP_SERVER_IP = "tcp_server_ip"
         private const val KEY_TCP_SERVER_PORT = "tcp_server_port"
+        private const val KEY_ESP32_IP = "esp32_ip"
+        private const val KEY_ESP32_PORT = "esp32_port"
     }
 }
 

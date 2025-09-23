@@ -7,53 +7,25 @@ import kotlinx.coroutines.sync.withLock
 
 object CommunicationHub {
 
-    // --- ▼▼▼ BLE 오디오(ByteArray) -> TCP 통신을 위한 Flow 추가 ▼▼▼ ---
-    private val bleAudioToTcpMutex = Mutex()
-    private val _bleAudioToTcpFlow = MutableSharedFlow<ByteArray>(replay = 0, extraBufferCapacity = 10)
-    val bleAudioToTcpFlow = _bleAudioToTcpFlow.asSharedFlow()
-    // --- ▲▲▲ Flow 추가 끝 ▲▲▲ ---
+    // ESP32 Audio (ByteArray) -> PC 서버 TCP (이름 변경)
+    private val esp32AudioToServerMutex = Mutex()
+    private val _esp32AudioToServerFlow = MutableSharedFlow<ByteArray>(replay = 0, extraBufferCapacity = 10)
+    val esp32AudioToServerFlow = _esp32AudioToServerFlow.asSharedFlow()
 
+    // PC 서버 TCP -> ESP32 (String) (이름 변경)
+    private val serverToEsp32Mutex = Mutex()
+    private val _serverToEsp32Flow = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 10)
+    val serverToEsp32Flow = _serverToEsp32Flow.asSharedFlow()
 
-    // TCP/IP -> BLE (String) - 기존 유지
-    private val tcpToBleMutex = Mutex()
-    private val _tcpToBleFlow = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 10)
-    val tcpToBleFlow = _tcpToBleFlow.asSharedFlow()
-
-    // Wi-Fi Direct -> TCP/IP (String) - 기존 유지
-    private val wifiDirectToTcpMutex = Mutex()
-    private val _wifiDirectToTcpFlow = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 10)
-    val wifiDirectToTcpFlow = _wifiDirectToTcpFlow.asSharedFlow()
-
-    // TCP/IP -> Wi-Fi Direct (String) - 기존 유지
-    private val tcpToWifiDirectMutex = Mutex()
-    private val _tcpToWifiDirectFlow = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 10)
-    val tcpToWifiDirectFlow = _tcpToWifiDirectFlow.asSharedFlow()
-
-
-    // --- ▼▼▼ ByteArray를 emit하는 함수 추가 ▼▼▼ ---
-    suspend fun emitBleAudioToTcp(message: ByteArray) {
-        bleAudioToTcpMutex.withLock {
-            _bleAudioToTcpFlow.emit(message)
-        }
-    }
-    // --- ▲▲▲ 함수 추가 끝 ▲▲▲ ---
-
-
-    suspend fun emitTcpToBle(message: String) {
-        tcpToBleMutex.withLock {
-            _tcpToBleFlow.emit(message)
+    suspend fun emitEsp32AudioToServer(message: ByteArray) {
+        esp32AudioToServerMutex.withLock {
+            _esp32AudioToServerFlow.emit(message)
         }
     }
 
-    suspend fun emitWifiDirectToTcp(message: String) {
-        wifiDirectToTcpMutex.withLock {
-            _wifiDirectToTcpFlow.emit(message)
-        }
-    }
-
-    suspend fun emitTcpToWifiDirect(message: String) {
-        tcpToWifiDirectMutex.withLock {
-            _tcpToWifiDirectFlow.emit(message)
+    suspend fun emitServerToEsp32(message: String) {
+        serverToEsp32Mutex.withLock {
+            _serverToEsp32Flow.emit(message)
         }
     }
 }

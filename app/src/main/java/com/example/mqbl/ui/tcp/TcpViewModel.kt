@@ -30,13 +30,15 @@ class TcpViewModel(application: Application) : AndroidViewModel(application) {
 
     private val defaultTcpUiState = TcpUiState(connectionStatus = "서비스 연결 대기 중...")
 
+    // --- ▼▼▼ getTcpUiStateFlow -> getServerTcpUiStateFlow로 수정 ▼▼▼ ---
     val tcpUiState: StateFlow<TcpUiState> = _binder.flatMapLatest { binder ->
-        binder?.getTcpUiStateFlow() ?: flowOf(defaultTcpUiState)
+        binder?.getServerTcpUiStateFlow() ?: flowOf(defaultTcpUiState)
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000L),
         initialValue = defaultTcpUiState
     )
+    // --- ▲▲▲ 수정 끝 ▲▲▲ ---
 
     init {
         Intent(application, CommunicationService::class.java).also { intent ->
@@ -44,26 +46,25 @@ class TcpViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // --- ▼▼▼ connect 함수가 IP와 Port를 받도록 수정 ▼▼▼ ---
+    // --- ▼▼▼ connect 함수가 IP와 Port를 받도록 수정하고, 서비스 함수 호출 이름 변경 ▼▼▼ ---
     fun connect(ip: String, port: Int) {
         if (ip.isBlank() || port <= 0) {
             Log.w(TAG, "Invalid IP or Port for connection.")
-            // Optionally update UI state to show an error
             return
         }
-        Log.i(TAG, "UI Action: Request TCP connect to $ip:$port")
-        _binder.value?.getService()?.requestTcpConnect(ip, port)
+        Log.i(TAG, "UI Action: Request Server TCP connect to $ip:$port")
+        _binder.value?.getService()?.requestServerTcpConnect(ip, port)
     }
-    // --- ▲▲▲ 수정 끝 ▲▲▲ ---
 
     fun disconnect() {
-        Log.i(TAG, "UI Action: Request TCP disconnect")
-        _binder.value?.getService()?.requestTcpDisconnect()
+        Log.i(TAG, "UI Action: Request Server TCP disconnect")
+        _binder.value?.getService()?.requestServerTcpDisconnect()
     }
 
     fun sendMessage(message: String) {
-        _binder.value?.getService()?.sendTcpMessage(message)
+        _binder.value?.getService()?.sendToServer(message)
     }
+    // --- ▲▲▲ 수정 끝 ▲▲▲ ---
 
     override fun onCleared() {
         super.onCleared()
@@ -75,4 +76,3 @@ class TcpViewModel(application: Application) : AndroidViewModel(application) {
         _binder.value = null
     }
 }
-
