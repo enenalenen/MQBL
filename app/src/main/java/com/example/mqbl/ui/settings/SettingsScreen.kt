@@ -7,10 +7,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.mqbl.R
 import com.example.mqbl.ui.main.MainUiState
 import com.example.mqbl.ui.tcp.TcpUiState
 
@@ -105,7 +107,6 @@ fun SettingsScreen(
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    // 진동 제어
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                         Text("진동 강도 조절 (0 ~ 10)", style = MaterialTheme.typography.bodyLarge)
                         Spacer(modifier = Modifier.height(10.dp))
@@ -124,11 +125,8 @@ fun SettingsScreen(
                         }
                     }
 
-                    // --- ▼▼▼ Divider -> HorizontalDivider로 수정 ▼▼▼ ---
                     HorizontalDivider()
-                    // --- ▲▲▲ 수정 끝 ▲▲▲ ---
 
-                    // 오디오 녹음
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                         Text("ESP32 오디오 녹음 테스트", style = MaterialTheme.typography.titleMedium)
                         Text(
@@ -191,7 +189,6 @@ fun SettingsScreen(
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text("PC 서버 설정 (STT)", style = MaterialTheme.typography.titleMedium)
                     Spacer(modifier = Modifier.height(8.dp))
-
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(
                             value = serverIp,
@@ -221,17 +218,45 @@ fun SettingsScreen(
                     ) {
                         Text("서버 주소 저장")
                     }
-
-                    // --- ▼▼▼ Divider -> HorizontalDivider로 수정 ▼▼▼ ---
                     HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
-                    // --- ▲▲▲ 수정 끝 ▲▲▲ ---
-
                     Text(text = serverTcpUiState.connectionStatus)
                     serverTcpUiState.errorMessage?.let { Text(text = "오류: $it", color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
                     Spacer(modifier = Modifier.height(16.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                         Button(onClick = onServerConnect, enabled = !serverTcpUiState.isConnected && !serverTcpUiState.connectionStatus.contains("연결 중")) { Text("서버 연결") }
                         Button(onClick = onServerDisconnect, enabled = serverTcpUiState.isConnected || serverTcpUiState.connectionStatus.contains("연결 중")) { Text("연결 해제") }
+                    }
+                }
+            }
+        }
+
+        // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+        // 사라졌던 '앱 설정' UI 섹션을 여기에 복원했습니다.
+        // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(stringResource(id = R.string.app_settings_title), style = MaterialTheme.typography.titleMedium)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(stringResource(id = R.string.background_execution_title), style = MaterialTheme.typography.bodyLarge)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                stringResource(id = R.string.background_execution_summary),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Switch(
+                            checked = settingsUiState.isBackgroundExecutionEnabled,
+                            onCheckedChange = onBackgroundExecutionToggled
+                        )
                     }
                 }
             }

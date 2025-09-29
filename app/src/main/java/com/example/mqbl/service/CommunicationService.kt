@@ -100,10 +100,15 @@ class CommunicationService : LifecycleService() {
     private var audioRecordingStream: ByteArrayOutputStream? = null
 
     // --- PC 서버 TCP/IP ---
-    private var serverSocket: Socket? = null
-    private var serverOutputStream: OutputStream? = null
-    private var serverBufferedReader: BufferedReader? = null
-    private var serverReceiveJob: Job? = null
+    private var serverAudioSocket: Socket? = null // 오디오 소켓
+    private var serverCommandSocket: Socket? = null // 명령어 소켓
+
+    private var serverAudioOutputStream: OutputStream? = null
+    private var serverCommandOutputStream: OutputStream? = null
+    private var serverAudioBufferedReader: BufferedReader? = null
+
+    private var serverConnectionJob: Job? = null // 통합 연결 관리 Job
+
     private var currentServerIp: String = ""
     private var currentServerPort: Int = 0
     private val _serverTcpUiState = MutableStateFlow(TcpUiState(connectionStatus = "PC서버: 연결 끊김"))
@@ -137,16 +142,28 @@ class CommunicationService : LifecycleService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         val action = intent?.action
+        Log.i(TAG_SERVICE, "Service onStartCommand Received with action: $action")
+
         when (action) {
-            ACTION_START_FOREGROUND -> startForeground(NOTIFICATION_ID, createNotification("서비스 실행 중..."))
+            ACTION_START_FOREGROUND -> {
+                startForeground(NOTIFICATION_ID, createNotification("서비스 실행 중..."))
+                Log.i(TAG_SERVICE, "Foreground service started explicitly.")
+            }
             ACTION_STOP_FOREGROUND -> {
+                Log.i(TAG_SERVICE, "Stopping foreground service notification...")
                 stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+                // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+                // 이 줄을 삭제하여 서비스가 완전히 종료되는 것을 방지합니다.
+                // stopSelf()
+                // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
             }
             else -> {
                 lifecycleScope.launch {
                     if (settingsRepository.isBackgroundExecutionEnabledFlow.first()) {
                         startForeground(NOTIFICATION_ID, createNotification("서비스 실행 중..."))
+                        Log.i(TAG_SERVICE, "Service started, background execution is ENABLED.")
+                    } else {
+                        Log.i(TAG_SERVICE, "Service started, background execution is DISABLED.")
                     }
                 }
             }
@@ -192,7 +209,7 @@ class CommunicationService : LifecycleService() {
     }
 
     fun sendToServer(message: String) {
-        sendToServerTcp(message)
+        sendToServerCommand(message)
     }
 
     fun startAudioRecording() {
@@ -311,42 +328,61 @@ class CommunicationService : LifecycleService() {
 
     // --- PC 서버 TCP Private Methods ---
     private fun connectToServer(ip: String, port: Int) {
-        if (serverSocket?.isConnected == true || _serverTcpUiState.value.connectionStatus.contains("연결 중")) {
+        if (_serverTcpUiState.value.isConnected || _serverTcpUiState.value.connectionStatus.contains("연결 중")) {
             return
         }
-        serverReceiveJob?.cancel()
-        serverReceiveJob = lifecycleScope.launch(Dispatchers.IO) {
+
+        serverConnectionJob?.cancel()
+        serverConnectionJob = lifecycleScope.launch(Dispatchers.IO) {
             try {
                 _serverTcpUiState.update { it.copy(connectionStatus = "PC서버: 연결 중...", errorMessage = null) }
                 updateNotificationCombined()
-                serverSocket = Socket()
-                serverSocket!!.connect(InetSocketAddress(ip, port), SOCKET_TIMEOUT)
-                serverOutputStream = serverSocket!!.getOutputStream()
-                serverBufferedReader = BufferedReader(InputStreamReader(serverSocket!!.getInputStream()))
+
+                // 1. 오디오 소켓 연결 (기존 포트)
+                serverAudioSocket = Socket()
+                serverAudioSocket!!.connect(InetSocketAddress(ip, port), SOCKET_TIMEOUT)
+                serverAudioOutputStream = serverAudioSocket!!.getOutputStream()
+                serverAudioBufferedReader = BufferedReader(InputStreamReader(serverAudioSocket!!.getInputStream()))
+                Log.i(TAG_SERVER_TCP, "Audio socket connected to $ip:$port")
+
+                // 2. 명령어 소켓 연결 (포트 + 1)
+                val commandPort = port + 1
+                serverCommandSocket = Socket()
+                serverCommandSocket!!.connect(InetSocketAddress(ip, commandPort), SOCKET_TIMEOUT)
+                serverCommandOutputStream = serverCommandSocket!!.getOutputStream()
+                Log.i(TAG_SERVER_TCP, "Command socket connected to $ip:$commandPort")
+
                 _serverTcpUiState.update { it.copy(isConnected = true, connectionStatus = "PC서버: 연결됨", errorMessage = null) }
                 updateNotificationCombined()
-                startServerReceiveLoop()
+
+                // 3. 오디오 소켓에서 키워드 수신 시작
+                startServerKeywordReceiveLoop()
+
             } catch (e: Exception) {
+                Log.e(TAG_SERVER_TCP, "Server Connection Error", e)
                 _serverTcpUiState.update { it.copy(isConnected = false, connectionStatus = "PC서버: 연결 실패", errorMessage = e.message) }
                 updateNotificationCombined()
-                closeServerSocket()
+                closeServerSockets()
             }
         }
     }
 
-    private fun startServerReceiveLoop() {
-        serverReceiveJob = lifecycleScope.launch(Dispatchers.IO) {
-            while (this.isActive) {
+    private fun startServerKeywordReceiveLoop() {
+        // 기존 startServerReceiveLoop의 이름을 변경하고, 오디오 소켓만 사용하도록 함
+        serverConnectionJob = lifecycleScope.launch(Dispatchers.IO) {
+            while (this.isActive && serverAudioSocket?.isConnected == true) {
                 try {
-                    val line = serverBufferedReader?.readLine()
+                    val line = serverAudioBufferedReader?.readLine()
                     if (line != null) {
                         val newItem = TcpMessageItem(source = "$currentServerIp:$currentServerPort", payload = line)
                         _receivedServerTcpMessages.update { list -> (listOf(newItem) + list).take(MAX_TCP_LOG_SIZE) }
                         CommunicationHub.emitServerToEsp32(line)
                     } else {
+                        Log.w(TAG_SERVER_TCP, "Keyword stream ended. Server closed connection.")
                         break
                     }
                 } catch (e: IOException) {
+                    Log.e(TAG_SERVER_TCP, "Keyword receive loop error.", e)
                     break
                 }
             }
@@ -357,35 +393,41 @@ class CommunicationService : LifecycleService() {
     }
 
     private fun sendAudioToServer(data: ByteArray) {
-        if (serverSocket?.isConnected != true || serverOutputStream == null) return
+        if (serverAudioSocket?.isConnected != true || serverAudioOutputStream == null) return
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                serverOutputStream?.write(data)
-                serverOutputStream?.flush()
+                serverAudioOutputStream?.write(data)
+                serverAudioOutputStream?.flush()
             } catch (e: Exception) {
                 disconnectFromServer(false, "오디오 전송 중 연결 끊김")
             }
         }
     }
 
-    private fun sendToServerTcp(message: String) {
-        if (serverSocket?.isConnected != true || serverOutputStream == null) return
+    private fun sendToServerCommand(message: String) {
+        // sendToServerTcp -> sendToServerCommand로 이름 변경 및 명령어 소켓 사용
+        if (serverCommandSocket?.isConnected != true || serverCommandOutputStream == null) {
+            showToast("서버 명령어 채널에 연결되지 않았습니다.")
+            return
+        }
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                serverOutputStream?.write((message + "\n").toByteArray(Charsets.UTF_8))
-                serverOutputStream?.flush()
-                val sentItem = TcpMessageItem(source = "앱 -> 서버", payload = message)
+                serverCommandOutputStream?.write((message + "\n").toByteArray(Charsets.UTF_8))
+                serverCommandOutputStream?.flush()
+                val sentItem = TcpMessageItem(source = "앱 -> 서버 (명령어)", payload = message)
                 _receivedServerTcpMessages.update { list -> (listOf(sentItem) + list).take(MAX_TCP_LOG_SIZE) }
             } catch (e: Exception) {
-                disconnectFromServer(false, "전송 중 연결 끊김")
+                // 명령어 전송 실패는 전체 연결을 끊을 필요는 없음
+                Log.e(TAG_SERVER_TCP, "Failed to send command", e)
+                showToast("서버로 명령어 전송 실패")
             }
         }
     }
 
+
     private fun disconnectFromServer(userRequested: Boolean, reason: String? = null) {
-        if (serverSocket == null && !_serverTcpUiState.value.isConnected && !_serverTcpUiState.value.connectionStatus.contains("연결 중")) return
-        serverReceiveJob?.cancel()
-        closeServerSocket()
+        serverConnectionJob?.cancel()
+        closeServerSockets()
         val statusMessage = reason ?: if (userRequested) "연결 해제됨" else "연결 끊김"
         _serverTcpUiState.update {
             it.copy(isConnected = false, connectionStatus = "PC서버: $statusMessage", errorMessage = if (reason != null && !userRequested) reason else null)
@@ -393,46 +435,70 @@ class CommunicationService : LifecycleService() {
         updateNotificationCombined()
     }
 
-    private fun closeServerSocket() {
-        try { serverOutputStream?.close() } catch (e: IOException) {}
-        try { serverBufferedReader?.close() } catch (e: IOException) {}
-        try { serverSocket?.close() } catch (e: IOException) {}
-        serverSocket = null
-        serverOutputStream = null
-        serverBufferedReader = null
+    private fun closeServerSockets() {
+        // 두 소켓을 모두 닫도록 수정
+        try { serverAudioOutputStream?.close() } catch (e: IOException) {}
+        try { serverAudioBufferedReader?.close() } catch (e: IOException) {}
+        try { serverAudioSocket?.close() } catch (e: IOException) {}
+        try { serverCommandOutputStream?.close() } catch (e: IOException) {}
+        try { serverCommandSocket?.close() } catch (e: IOException) {}
+        serverAudioSocket = null
+        serverCommandSocket = null
+        Log.d(TAG_SERVER_TCP, "Server sockets closed.")
     }
 
     // --- Hub Listeners & Notifications ---
     private fun listenForServerToEsp32Messages() {
         lifecycleScope.launch {
             CommunicationHub.serverToEsp32Flow.collect { message ->
-                var shouldSendToEsp32 = false
+                // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+                // 이 함수 전체를 아래 내용으로 교체합니다.
+                // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+                Log.i(TAG_SERVICE, "Service received message from Hub: $message")
+
+                var commandToSendToEsp32: String? = null
                 val receivedKeywords = message.trim().split(',').map { it.trim() }.filter { it.isNotEmpty() }
-                receivedKeywords.forEach { receivedKeyword ->
-                    val isCustomKeyword = customKeywords.any { custom -> receivedKeyword.equals(custom, ignoreCase = true) }
-                    if (isCustomKeyword) {
-                        addCustomSoundEvent("'$receivedKeyword' 단어 감지됨")
-                        sendAlertNotification("음성 감지!", "'$receivedKeyword' 단어 감지됨")
-                        shouldSendToEsp32 = true
-                    } else {
-                        val alarmEventDescription = when (receivedKeyword.lowercase()) {
-                            "siren" -> "사이렌 감지됨"
-                            "horn" -> "경적 감지됨"
-                            "boom" -> "폭발음 감지됨"
-                            else -> null
-                        }
-                        if (alarmEventDescription != null) {
-                            addDetectionEvent(alarmEventDescription)
-                            sendAlertNotification("위험 감지!", alarmEventDescription)
-                            shouldSendToEsp32 = true
-                        }
+
+                // 경고 키워드가 하나라도 있는지 먼저 확인
+                val alarmKeywordsDetected = receivedKeywords.filter { received ->
+                    isAlarmKeyword(received.lowercase())
+                }
+
+                if (alarmKeywordsDetected.isNotEmpty()) {
+                    // 경고 키워드가 있으면, 가장 우선적으로 양쪽 진동 처리
+                    commandToSendToEsp32 = "VIBRATE_BOTH"
+                    val description = "'${alarmKeywordsDetected.joinToString()}' 경고 감지됨"
+                    addDetectionEvent(description)
+                    sendAlertNotification("🚨 위험 감지!", description)
+                } else {
+                    // 경고 키워드가 없으면, 사용자 정의 단어가 있는지 확인
+                    val customKeywordsDetected = receivedKeywords.filter { received ->
+                        customKeywords.any { custom -> received.equals(custom, ignoreCase = true) }
+                    }
+                    if (customKeywordsDetected.isNotEmpty()) {
+                        commandToSendToEsp32 = "VIBRATE_RIGHT"
+                        val description = "'${customKeywordsDetected.joinToString()}' 단어 감지됨"
+                        addCustomSoundEvent(description)
+                        sendAlertNotification("🗣️ 음성 감지!", description)
                     }
                 }
-                if (shouldSendToEsp32 && _mainUiState.value.isEspConnected) {
-                    sendToEsp32("VIBRATE_TRIGGER")
+
+                // 최종적으로 결정된 명령어가 있으면 ESP32로 전송
+                commandToSendToEsp32?.let { command ->
+                    if (_mainUiState.value.isEspConnected) {
+                        Log.d(TAG_ESP32_TCP, "Service sending command ('$command') to ESP32.")
+                        sendToEsp32(command)
+                    } else {
+                        Log.w(TAG_ESP32_TCP, "Service cannot send command to ESP32: Not connected.")
+                    }
                 }
+                // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
             }
         }
+    }
+
+    private fun isAlarmKeyword(keyword: String): Boolean {
+        return keyword in listOf("siren", "horn", "boom")
     }
 
     private fun updateNotificationCombined() {
