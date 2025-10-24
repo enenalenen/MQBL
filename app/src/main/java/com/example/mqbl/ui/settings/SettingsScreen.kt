@@ -67,14 +67,15 @@ fun SettingsScreen(
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("ESP32 연결 설정 (Wi-Fi)", style = MaterialTheme.typography.titleMedium)
+                    Text("넥밴드 연결 설정", style = MaterialTheme.typography.titleMedium)
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(
                             value = esp32ServerIp,
                             onValueChange = onEsp32ServerIpChange,
-                            label = { Text("ESP32 IP 주소") },
+                            label = { Text("넥밴드 IP 주소") },
+                            placeholder = { Text("예시: 10.12.12.123") },
                             modifier = Modifier.weight(2f),
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
@@ -85,6 +86,7 @@ fun SettingsScreen(
                             value = esp32ServerPort,
                             onValueChange = onEsp32ServerPortChange,
                             label = { Text("포트") },
+                            placeholder = { Text("예시:1234") },
                             modifier = Modifier.weight(1f),
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -96,7 +98,7 @@ fun SettingsScreen(
                     mainUiState.connectError?.let { Text(text = "오류: $it", color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
                     Spacer(modifier = Modifier.height(16.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        Button(onClick = onEsp32Connect, enabled = !mainUiState.isEspConnected && !mainUiState.isConnecting) { Text("ESP32 연결") }
+                        Button(onClick = onEsp32Connect, enabled = !mainUiState.isEspConnected && !mainUiState.isConnecting) { Text("넥밴드 연결") }
                         Button(onClick = onEsp32Disconnect, enabled = mainUiState.isEspConnected || mainUiState.isConnecting) { Text("연결 해제") }
                     }
                 }
@@ -128,9 +130,9 @@ fun SettingsScreen(
                     HorizontalDivider()
 
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                        Text("ESP32 오디오 녹음 테스트", style = MaterialTheme.typography.titleMedium)
+                        Text("오디오 녹음 테스트", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "ESP32와 연결된 상태에서 녹음/중지 시, 오디오가 .wav 파일로 저장됩니다.",
+                            "넥밴드와 연결된 상태에서 녹음/중지 시, 오디오가 .wav 파일로 저장됩니다.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -187,7 +189,7 @@ fun SettingsScreen(
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("PC 서버 설정 (STT)", style = MaterialTheme.typography.titleMedium)
+                    Text("서버 연결 설정", style = MaterialTheme.typography.titleMedium)
                     Spacer(modifier = Modifier.height(8.dp))
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(
@@ -272,7 +274,7 @@ fun SettingsScreenPreview() {
         SettingsScreen(
             settingsUiState = SettingsUiState(isBackgroundExecutionEnabled = true, isRecording = false),
             onBackgroundExecutionToggled = {},
-            mainUiState = MainUiState(status = "ESP32: 연결됨", espDeviceName = "ESP32 (Preview)", isEspConnected = true),
+            mainUiState = MainUiState(status = "넥밴드: 연결됨", espDeviceName = "넥밴드 (Preview)", isEspConnected = true),
             onSendVibrationValue = {},
             onSendCommand = {},
             onStartRecording = {},

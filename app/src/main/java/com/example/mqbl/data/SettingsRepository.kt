@@ -6,10 +6,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/**
- * 앱 설정을 SharedPreferences에 저장하고 관리하는 클래스.
- * 싱글턴으로 구현하여 앱 전체에서 하나의 인스턴스만 사용하도록 합니다.
- */
 class SettingsRepository private constructor(context: Context) {
 
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -32,33 +28,6 @@ class SettingsRepository private constructor(context: Context) {
     private val _esp32Port = MutableStateFlow(getEsp32Port())
     val esp32PortFlow: StateFlow<String> = _esp32Port.asStateFlow()
 
-    fun getCustomKeywords(): String {
-        return prefs.getString(KEY_CUSTOM_KEYWORDS, "") ?: ""
-    }
-
-    fun setCustomKeywords(keywords: String) {
-        prefs.edit().putString(KEY_CUSTOM_KEYWORDS, keywords).apply()
-        _customKeywords.value = keywords
-    }
-
-    fun getTcpServerIp(): String {
-        return prefs.getString(KEY_TCP_SERVER_IP, "192.168.0.5") ?: "192.168.0.5"
-    }
-
-    fun setTcpServerIp(ip: String) {
-        prefs.edit().putString(KEY_TCP_SERVER_IP, ip).apply()
-        _tcpServerIp.value = ip
-    }
-
-    fun getTcpServerPort(): String {
-        return prefs.getString(KEY_TCP_SERVER_PORT, "6789") ?: "6789"
-    }
-
-    fun setTcpServerPort(port: String) {
-        prefs.edit().putString(KEY_TCP_SERVER_PORT, port).apply()
-        _tcpServerPort.value = port
-    }
-
     fun getEsp32Ip(): String {
         return prefs.getString(KEY_ESP32_IP, "192.168.43.101") ?: "192.168.43.101"
     }
@@ -77,7 +46,37 @@ class SettingsRepository private constructor(context: Context) {
         _esp32Port.value = port
     }
 
+    fun getTcpServerIp(): String {
+        return prefs.getString(KEY_TCP_SERVER_IP, "192.168.0.1") ?: "192.168.0.1"
+    }
+
+    fun setTcpServerIp(ip: String) {
+        prefs.edit().putString(KEY_TCP_SERVER_IP, ip).apply()
+        _tcpServerIp.value = ip
+    }
+
+    fun getTcpServerPort(): String {
+        return prefs.getString(KEY_TCP_SERVER_PORT, "6789") ?: "6789"
+    }
+
+    fun setTcpServerPort(port: String) {
+        prefs.edit().putString(KEY_TCP_SERVER_PORT, port).apply()
+        _tcpServerPort.value = port
+    }
+
+    fun getCustomKeywords(): String {
+        return prefs.getString(KEY_CUSTOM_KEYWORDS, "") ?: ""
+    }
+
+    fun setCustomKeywords(keywords: String) {
+        prefs.edit().putString(KEY_CUSTOM_KEYWORDS, keywords).apply()
+        _customKeywords.value = keywords
+    }
+
     fun isBackgroundExecutionEnabled(): Boolean {
+        // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+        // 기본값을 false에서 true로 변경합니다.
+        // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
         return prefs.getBoolean(KEY_BACKGROUND_EXECUTION, true)
     }
 
@@ -107,4 +106,3 @@ class SettingsRepository private constructor(context: Context) {
         private const val KEY_ESP32_PORT = "esp32_port"
     }
 }
-

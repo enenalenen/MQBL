@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">MQBL</string>
+    <string name="app_name">SmartNeckBand</string>
 
     <string name="app_settings_title">앱 설정</string>
     <string name="background_execution_title">백그라운드에서 앱 실행</string>

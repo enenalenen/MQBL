@@ -46,18 +46,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private val _customKeywords = MutableStateFlow("")
     val customKeywords = _customKeywords.asStateFlow()
 
-    // PC 서버 TCP IP/Port
     private val _serverIp = MutableStateFlow("")
     val serverIp = _serverIp.asStateFlow()
     private val _serverPort = MutableStateFlow("")
     val serverPort = _serverPort.asStateFlow()
 
-    // ESP32 TCP IP/Port
     private val _esp32Ip = MutableStateFlow("")
     val esp32Ip = _esp32Ip.asStateFlow()
     private val _esp32Port = MutableStateFlow("")
     val esp32Port = _esp32Port.asStateFlow()
-
 
     init {
         Intent(application, CommunicationService::class.java).also { intent ->
@@ -90,22 +87,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
 
     // --- Recording ---
-    fun startRecording() {
-        _binder.value?.getService()?.startAudioRecording()
-    }
-    fun stopRecording() {
-        _binder.value?.getService()?.stopAndSaveAudioRecording()
-    }
+    fun startRecording() { _binder.value?.getService()?.startAudioRecording() }
+    fun stopRecording() { _binder.value?.getService()?.stopAndSaveAudioRecording() }
 
     // --- Keywords ---
-    fun updateCustomKeywords(keywords: String) {
-        _customKeywords.value = keywords
-    }
+    fun updateCustomKeywords(keywords: String) { _customKeywords.value = keywords }
     fun saveCustomKeywords() {
         viewModelScope.launch {
             settingsRepository.setCustomKeywords(_customKeywords.value)
             val isServerConnected = _binder.value?.getServerTcpUiStateFlow()?.first()?.isConnected ?: false
-
             if (isServerConnected) {
                 val command = "CMD_UPDATE_KEYWORDS:${_customKeywords.value}"
                 _binder.value?.getService()?.sendToServer(command)
@@ -142,41 +132,42 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     // --- Service Actions ---
     fun connectToEsp32() {
         val port = _esp32Port.value.toIntOrNull()
-        if (port == null) {
-            showToast("ESP32 포트 번호가 올바르지 않습니다.")
-            return
-        }
+        if (port == null) { showToast("ESP32 포트 번호가 올바르지 않습니다."); return }
         _binder.value?.getService()?.requestEsp32Connect(_esp32Ip.value, port)
     }
 
-    fun disconnectFromEsp32() {
-        _binder.value?.getService()?.requestEsp32Disconnect()
-    }
+    fun disconnectFromEsp32() { _binder.value?.getService()?.requestEsp32Disconnect() }
 
     fun connectToServer() {
         val port = _serverPort.value.toIntOrNull()
-        if (port == null) {
-            showToast("PC 서버 포트 번호가 올바르지 않습니다.")
-            return
-        }
+        if (port == null) { showToast("PC 서버 포트 번호가 올바르지 않습니다."); return }
         _binder.value?.getService()?.requestServerTcpConnect(_serverIp.value, port)
     }
 
-    fun disconnectFromServer() {
-        _binder.value?.getService()?.requestServerTcpDisconnect()
-    }
+    fun disconnectFromServer() { _binder.value?.getService()?.requestServerTcpDisconnect() }
+    fun sendVibrationValue(value: Int) { _binder.value?.getService()?.sendVibrationValueToEsp32(value) }
+    fun sendCommandToEsp32(command: String) { _binder.value?.getService()?.sendCommandToEsp32(command) }
 
-    fun sendVibrationValue(value: Int) {
-        _binder.value?.getService()?.sendVibrationValueToEsp32(value)
-    }
-
-    fun sendCommandToEsp32(command: String) {
-        _binder.value?.getService()?.sendCommandToEsp32(command)
-    }
-
+    // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+    // 백그라운드 실행 토글 기능을 여기에 명확하게 다시 구현합니다.
+    // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
     fun toggleBackgroundExecution(enabled: Boolean) {
-        // ... (기존과 동일)
+        viewModelScope.launch {
+            // 1. 설정 저장
+            settingsRepository.setBackgroundExecution(enabled)
+
+            // 2. 서비스에 적절한 명령 전송
+            val serviceIntent = Intent(getApplication(), CommunicationService::class.java).apply {
+                action = if (enabled) {
+                    CommunicationService.ACTION_START_FOREGROUND
+                } else {
+                    CommunicationService.ACTION_STOP_FOREGROUND
+                }
+            }
+            getApplication<Application>().startService(serviceIntent)
+        }
     }
+    // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
     private fun showToast(message: String){
         Toast.makeText(getApplication(), message, Toast.LENGTH_SHORT).show()

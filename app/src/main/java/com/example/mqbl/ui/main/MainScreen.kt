@@ -63,7 +63,7 @@ fun MainScreen(
             )
         } else {
             Text(
-                "연결되지 않음. '사용자 설정' 탭에서 ESP32에 연결하세요.",
+                "연결되지 않음. 넥밴드에 연결하세요.",
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(bottom = 8.dp)
             )
