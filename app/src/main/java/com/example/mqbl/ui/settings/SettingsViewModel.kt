@@ -124,7 +124,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             settingsRepository.setEsp32Ip(_esp32Ip.value)
             settingsRepository.setEsp32Port(_esp32Port.value)
-            showToast("ESP32 주소가 저장되었습니다.")
+            showToast("주소가 저장되었습니다.")
             connectToEsp32()
         }
     }
@@ -132,7 +132,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     // --- Service Actions ---
     fun connectToEsp32() {
         val port = _esp32Port.value.toIntOrNull()
-        if (port == null) { showToast("ESP32 포트 번호가 올바르지 않습니다."); return }
+        if (port == null) { showToast("포트 번호가 올바르지 않습니다."); return }
         _binder.value?.getService()?.requestEsp32Connect(_esp32Ip.value, port)
     }
 
@@ -140,7 +140,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun connectToServer() {
         val port = _serverPort.value.toIntOrNull()
-        if (port == null) { showToast("PC 서버 포트 번호가 올바르지 않습니다."); return }
+        if (port == null) { showToast("서버 포트 번호가 올바르지 않습니다."); return }
         _binder.value?.getService()?.requestServerTcpConnect(_serverIp.value, port)
     }
 

@@ -151,7 +151,7 @@ private fun LogItem(description: String, timestamp: String, isDarkTheme: Boolean
 fun MainScreenPreview() {
     MaterialTheme {
         MainScreen(
-            uiState = MainUiState(status = "상태", isEspConnected = true, espDeviceName = "ESP32 (Preview)"),
+            uiState = MainUiState(status = "상태", isEspConnected = true, espDeviceName = "스마트 넥밴드 (Preview)"),
             detectionLog = listOf(DetectionEvent(description = "사이렌 감지됨 (미리보기)", timestamp = "12:34:56")),
             customSoundLog = listOf(CustomSoundEvent(description = "사용자 단어 감지됨 (미리보기)", timestamp = "12:35:00")),
         )

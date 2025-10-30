@@ -111,7 +111,7 @@ class CommunicationService : LifecycleService() {
 
     private var currentServerIp: String = ""
     private var currentServerPort: Int = 0
-    private val _serverTcpUiState = MutableStateFlow(TcpUiState(connectionStatus = "PC서버: 연결 끊김"))
+    private val _serverTcpUiState = MutableStateFlow(TcpUiState(connectionStatus = "서버: 연결 끊김"))
     private val _receivedServerTcpMessages = MutableStateFlow<List<TcpMessageItem>>(emptyList())
 
     private val timeFormatter = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
@@ -214,7 +214,7 @@ class CommunicationService : LifecycleService() {
 
     fun startAudioRecording() {
         if (!_mainUiState.value.isEspConnected) {
-            showToast("ESP32가 연결되지 않아 녹음을 시작할 수 없습니다.")
+            showToast("스마트 넥밴드가 연결되지 않아 녹음을 시작할 수 없습니다.")
             return
         }
         if (_isRecording.value) {
@@ -262,14 +262,14 @@ class CommunicationService : LifecycleService() {
         esp32ConnectionJob = lifecycleScope.launch(Dispatchers.IO) {
             var socket: Socket? = null
             try {
-                _mainUiState.update { it.copy(status = "ESP32: 연결 중...", isConnecting = true, connectError = null) }
+                _mainUiState.update { it.copy(status = "스마트 넥밴드: 연결 중...", isConnecting = true, connectError = null) }
                 updateNotificationCombined()
 
                 socket = Socket()
                 socket.connect(InetSocketAddress(ip, port), SOCKET_TIMEOUT)
                 socket.tcpNoDelay = true
 
-                _mainUiState.update { it.copy(status = "ESP32: 연결됨", isConnecting = false, isEspConnected = true, espDeviceName = "ESP32 ($ip)") }
+                _mainUiState.update { it.copy(status = "스마트 넥밴드: 연결됨", isConnecting = false, isEspConnected = true, espDeviceName = "스마트 넥밴드") }
                 updateNotificationCombined()
 
                 val inputStream = socket.getInputStream()
@@ -320,7 +320,7 @@ class CommunicationService : LifecycleService() {
                 Log.i(TAG_ESP32_TCP, "ESP32 Connection job finishing.")
                 socket?.close()
                 stopAndSaveAudioRecording()
-                _mainUiState.update { it.copy(isConnecting = false, isEspConnected = false, espDeviceName = null, status = "ESP32: 연결 끊김") }
+                _mainUiState.update { it.copy(isConnecting = false, isEspConnected = false, espDeviceName = null, status = "스마트 넥밴드: 연결 끊김") }
                 updateNotificationCombined()
             }
         }
@@ -352,7 +352,7 @@ class CommunicationService : LifecycleService() {
                 serverCommandOutputStream = serverCommandSocket!!.getOutputStream()
                 Log.i(TAG_SERVER_TCP, "Command socket connected to $ip:$commandPort")
 
-                _serverTcpUiState.update { it.copy(isConnected = true, connectionStatus = "PC서버: 연결됨", errorMessage = null) }
+                _serverTcpUiState.update { it.copy(isConnected = true, connectionStatus = "서버: 연결됨", errorMessage = null) }
                 updateNotificationCombined()
 
                 // 3. 오디오 소켓에서 키워드 수신 시작
@@ -360,7 +360,7 @@ class CommunicationService : LifecycleService() {
 
             } catch (e: Exception) {
                 Log.e(TAG_SERVER_TCP, "Server Connection Error", e)
-                _serverTcpUiState.update { it.copy(isConnected = false, connectionStatus = "PC서버: 연결 실패", errorMessage = e.message) }
+                _serverTcpUiState.update { it.copy(isConnected = false, connectionStatus = "서버: 연결 실패", errorMessage = e.message) }
                 updateNotificationCombined()
                 closeServerSockets()
             }
@@ -506,18 +506,18 @@ class CommunicationService : LifecycleService() {
             if (!settingsRepository.isBackgroundExecutionEnabledFlow.first()) return@launch
             val espStatus = _mainUiState.value.espDeviceName ?: "끊김"
             val serverStatusText = _serverTcpUiState.value.connectionStatus
-            updateNotification("ESP32: $espStatus, $serverStatusText")
+            updateNotification("스마트 넥밴드: $espStatus, $serverStatusText")
         }
     }
 
     private fun createNotificationChannel() {
-        val name = "MQBL 통신 서비스"
+        val name = "SmartNeckBand 통신 서비스"
         val descriptionText = "백그라운드 연결 상태 알림"
         val importance = NotificationManager.IMPORTANCE_LOW
         val channel = NotificationChannel(NOTIFICATION_CHANNEL_ID, name, importance).apply {
             description = descriptionText
         }
-        val alertChannelName = "MQBL 위험 감지 알림"
+        val alertChannelName = "SmartNeckBand 위험 감지 알림"
         val alertChannelDescription = "위험 상황 감지 시 알림"
         val alertImportance = NotificationManager.IMPORTANCE_HIGH
         val alertChannel = NotificationChannel(ALERT_NOTIFICATION_CHANNEL_ID, alertChannelName, alertImportance).apply {
@@ -537,7 +537,7 @@ class CommunicationService : LifecycleService() {
         }
         val pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, pendingIntentFlags)
         return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
-            .setContentTitle("MQBL 실행 중")
+            .setContentTitle("SmartNeckBand 실행 중")
             .setContentText(contentText)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
