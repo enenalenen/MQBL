@@ -71,8 +71,10 @@ private const val NOTIFICATION_CHANNEL_ID = "MQBL_Communication_Channel"
 private const val NOTIFICATION_ID = 1
 private const val SOCKET_TIMEOUT = 5000 // ms
 
-// ESP32 및 서버와 샘플링 속도를 일치시킴
-private const val LOCAL_AUDIO_SAMPLE_RATE = 10000
+// ▼▼▼ 수정된 코드 (10k -> 16k 변환) ▼▼▼
+// 폰 마이크(로컬)는 서버와 동일한 16000Hz를 유지
+private const val LOCAL_AUDIO_SAMPLE_RATE = 16000
+// ▲▲▲ 수정된 코드 ▲▲▲
 private const val LOCAL_AUDIO_CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
 private const val LOCAL_AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
 // -----------------
@@ -92,9 +94,7 @@ class CommunicationService : LifecycleService() {
         fun getIsRecordingFlow(): StateFlow<Boolean> = _isRecording.asStateFlow()
         fun getServerTcpUiStateFlow(): StateFlow<TcpUiState> = _serverTcpUiState.asStateFlow()
         fun getReceivedServerTcpMessagesFlow(): StateFlow<List<TcpMessageItem>> = _receivedServerTcpMessages.asStateFlow()
-        // ▼▼▼ 추가/수정된 코드 (ViewModel이 구독할 Flow) ▼▼▼
         fun getIsPhoneMicModeEnabledFlow(): StateFlow<Boolean> = _isPhoneMicModeEnabled.asStateFlow()
-        // ▲▲▲ 추가/수정된 코드 ▲▲▲
     }
     private val binder = LocalBinder()
 
@@ -125,7 +125,8 @@ class CommunicationService : LifecycleService() {
 
     private var serverAudioOutputStream: OutputStream? = null
     private var serverCommandOutputStream: OutputStream? = null
-    private var serverAudioBufferedReader: BufferedReader? = null
+    // (문제 2 해결됨)
+    private var serverCommandBufferedReader: BufferedReader? = null
 
     private var serverConnectionJob: Job? = null // 통합 연결 관리 Job
 
@@ -175,9 +176,7 @@ class CommunicationService : LifecycleService() {
 
         when (action) {
             ACTION_START_FOREGROUND -> {
-                // ▼▼▼ 추가/수정된 코드 (포그라운드 시작 시에도 상태 업데이트) ▼▼▼
                 updateNotificationCombined()
-                // ▲▲▲ 추가/수정된 코드 ▲▲▲
                 Log.i(TAG_SERVICE, "Foreground service started explicitly.")
             }
             ACTION_STOP_FOREGROUND -> {
@@ -187,9 +186,7 @@ class CommunicationService : LifecycleService() {
             else -> {
                 lifecycleScope.launch {
                     if (settingsRepository.isBackgroundExecutionEnabledFlow.first()) {
-                        // ▼▼▼ 추가/수정된 코드 (서비스 자동 시작 시에도 상태 업데이트) ▼▼▼
                         updateNotificationCombined()
-                        // ▲▲▲ 추가/수정된 코드 ▲▲▲
                         Log.i(TAG_SERVICE, "Service started, background execution is ENABLED.")
                     } else {
                         Log.i(TAG_SERVICE, "Service started, background execution is DISABLED.")
@@ -268,9 +265,7 @@ class CommunicationService : LifecycleService() {
             if (_mainUiState.value.isEspConnected) {
                 sendCommandToEsp32("PAUSE_AUDIO")
             }
-            // ▼▼▼ 추가/수정된 코드 (알림 업데이트) ▼▼▼
             updateNotificationCombined()
-            // ▲▲▲ 추가/수정된 코드 ▲▲▲
             return true // ViewModel에 성공을 알림
 
         } else {
@@ -280,9 +275,7 @@ class CommunicationService : LifecycleService() {
             if (_mainUiState.value.isEspConnected) {
                 sendCommandToEsp32("RESUME_AUDIO")
             }
-            // ▼▼▼ 추가/수정된 코드 (알림 업데이트) ▼▼▼
             updateNotificationCombined()
-            // ▲▲▲ 추가/수정된 코드 ▲▲▲
             return true // ViewModel에 성공을 알림
         }
     }
@@ -359,7 +352,9 @@ class CommunicationService : LifecycleService() {
 
                 val inputStream = socket.getInputStream()
                 val outputStream = socket.getOutputStream()
-                val buffer = ByteArray(2048)
+
+                // (버퍼 크기 4096 유지)
+                val buffer = ByteArray(4096)
 
                 while (currentCoroutineContext().isActive) {
                     val messageToSend = esp32OutgoingMessages.tryReceive().getOrNull()
@@ -377,15 +372,25 @@ class CommunicationService : LifecycleService() {
                     if (inputStream.available() > 0) {
                         val bytesRead = inputStream.read(buffer)
                         if (bytesRead > 0) {
-                            Log.v(TAG_ESP32_TCP, "Read $bytesRead bytes from ESP32")
-                            val audioData = buffer.copyOf(bytesRead)
+                            Log.v(TAG_ESP32_TCP, "Read $bytesRead bytes from ESP32 (10kHz)")
+                            val audioData = buffer.copyOf(bytesRead) // 10kHz 데이터
+
+                            // ▼▼▼ 수정된 코드 (10k -> 16k 변환) ▼▼▼
+                            // 10kHz -> 16kHz로 리샘플링
+                            val resampledAudioData = resample10kTo16k(audioData)
+                            Log.v(TAG_SERVICE, "Resampled ${audioData.size} bytes (10k) -> ${resampledAudioData.size} bytes (16k)")
+
                             if (_isRecording.value) {
-                                audioRecordingStream?.write(audioData)
+                                // 16kHz로 변환된 데이터를 녹음
+                                audioRecordingStream?.write(resampledAudioData)
                             }
 
                             if (_serverTcpUiState.value.isConnected && !_isPhoneMicModeEnabled.value) {
-                                sendAudioToServer(audioData)
+                                // 16kHz로 변환된 데이터를 서버로 전송
+                                sendAudioToServer(resampledAudioData)
                             }
+                            // ▲▲▲ 수정된 코드 ▲▲▲
+
                         } else if (bytesRead < 0) {
                             Log.w(TAG_ESP32_TCP, "Read -1, connection closed by peer.")
                             break
@@ -421,21 +426,25 @@ class CommunicationService : LifecycleService() {
                 _serverTcpUiState.update { it.copy(connectionStatus = "PC서버: 연결 중...", errorMessage = null) }
                 updateNotificationCombined()
 
+                // (문제 2 해결됨)
+                // 1. 오디오 소켓 (6789)은 쓰기 전용으로 설정
                 serverAudioSocket = Socket()
                 serverAudioSocket!!.connect(InetSocketAddress(ip, port), SOCKET_TIMEOUT)
                 serverAudioOutputStream = serverAudioSocket!!.getOutputStream()
-                serverAudioBufferedReader = BufferedReader(InputStreamReader(serverAudioSocket!!.getInputStream()))
-                Log.i(TAG_SERVER_TCP, "Audio socket connected to $ip:$port")
+                Log.i(TAG_SERVER_TCP, "Audio socket connected to $ip:$port (Write-Only)")
 
+                // 2. 명령어 소켓 (6790)은 읽기/쓰기용으로 설정
                 val commandPort = port + 1
                 serverCommandSocket = Socket()
                 serverCommandSocket!!.connect(InetSocketAddress(ip, commandPort), SOCKET_TIMEOUT)
                 serverCommandOutputStream = serverCommandSocket!!.getOutputStream()
-                Log.i(TAG_SERVER_TCP, "Command socket connected to $ip:$commandPort")
+                serverCommandBufferedReader = BufferedReader(InputStreamReader(serverCommandSocket!!.getInputStream()))
+                Log.i(TAG_SERVER_TCP, "Command socket connected to $ip:$commandPort (Read/Write)")
 
                 _serverTcpUiState.update { it.copy(isConnected = true, connectionStatus = "서버: 연결됨", errorMessage = null) }
                 updateNotificationCombined()
 
+                // STT 결과 수신 루프 시작
                 startServerKeywordReceiveLoop()
 
             } catch (e: Exception) {
@@ -448,10 +457,11 @@ class CommunicationService : LifecycleService() {
     }
 
     private fun startServerKeywordReceiveLoop() {
+        // (문제 2 해결됨)
         serverConnectionJob = lifecycleScope.launch(Dispatchers.IO) {
-            while (this.isActive && serverAudioSocket?.isConnected == true) {
+            while (this.isActive && serverCommandSocket?.isConnected == true) { // 명령어 소켓 감시
                 try {
-                    val line = serverAudioBufferedReader?.readLine()
+                    val line = serverCommandBufferedReader?.readLine() // 명령어 소켓에서 읽음
                     if (line != null) {
                         val newItem = TcpMessageItem(source = "$currentServerIp:$currentServerPort", payload = line)
                         _receivedServerTcpMessages.update { list -> (listOf(newItem) + list).take(MAX_TCP_LOG_SIZE) }
@@ -513,13 +523,18 @@ class CommunicationService : LifecycleService() {
     }
 
     private fun closeServerSockets() {
+        // (문제 2 해결됨)
         try { serverAudioOutputStream?.close() } catch (e: IOException) {}
-        try { serverAudioBufferedReader?.close() } catch (e: IOException) {}
         try { serverAudioSocket?.close() } catch (e: IOException) {}
         try { serverCommandOutputStream?.close() } catch (e: IOException) {}
+        try { serverCommandBufferedReader?.close() } catch (e: IOException) {}
         try { serverCommandSocket?.close() } catch (e: IOException) {}
         serverAudioSocket = null
+        serverAudioOutputStream = null
         serverCommandSocket = null
+        serverCommandOutputStream = null
+        serverCommandBufferedReader = null
+
         Log.d(TAG_SERVER_TCP, "Server sockets closed.")
     }
 
@@ -536,10 +551,13 @@ class CommunicationService : LifecycleService() {
         }
 
         try {
+            // ▼▼▼ 수정된 코드 (10k -> 16k 변환) ▼▼▼
+            // 폰 마이크는 16000Hz 유지
             localAudioBufferSize = AudioRecord.getMinBufferSize(LOCAL_AUDIO_SAMPLE_RATE, LOCAL_AUDIO_CHANNEL_CONFIG, LOCAL_AUDIO_FORMAT)
             if (localAudioBufferSize == AudioRecord.ERROR_BAD_VALUE) {
-                showToast("오디오 녹음 장치를 초기화할 수 없습니다. (샘플링 속도 10kHz 미지원)")
-                Log.e(TAG_SERVICE, "Device does not support 10000Hz sampling rate.")
+                showToast("오디오 녹음 장치를 초기화할 수 없습니다. (샘플링 속도 16kHz 미지원)")
+                Log.e(TAG_SERVICE, "Device does not support 16000Hz sampling rate.")
+                // ▲▲▲ 수정된 코드 ▲▲▲
                 return
             }
 
@@ -566,6 +584,7 @@ class CommunicationService : LifecycleService() {
                     val bytesRead = audioRecord?.read(buffer, 0, buffer.size) ?: 0
                     if (bytesRead > 0) {
                         if (_serverTcpUiState.value.isConnected && _isPhoneMicModeEnabled.value) {
+                            // 폰 마이크는 16kHz이므로 변환 없이 바로 전송
                             sendAudioToServer(buffer.copyOf(bytesRead))
                         }
                     } else if (bytesRead < 0) {
@@ -645,40 +664,27 @@ class CommunicationService : LifecycleService() {
         return keyword in listOf("siren", "horn", "boom")
     }
 
-    // ▼▼▼ 추가/수정된 코드 (알림 텍스트 로직 변경) ▼▼▼
     private fun updateNotificationCombined() {
         lifecycleScope.launch {
-            // 백그라운드 실행이 비활성화 상태면 알림을 아예 띄우지 않음 (혹은 기본 텍스트)
             if (!settingsRepository.isBackgroundExecutionEnabledFlow.first()) {
-                // 만약 이 함수가 호출된 시점에 알림이 떠있다면 지움
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 return@launch
             }
 
-            // Get all 3 states
             val isPhoneMicMode = _isPhoneMicModeEnabled.value
             val isServerConnected = _serverTcpUiState.value.isConnected
             val isEspConnected = _mainUiState.value.isEspConnected
 
-            // 사용자가 요청한 알림 텍스트 로직 적용
             val statusText = when {
-                // 1. 스마트폰 마이크 모드
                 isPhoneMicMode && isServerConnected -> "스마트폰 마이크 모드 실행 중"
-                // 2. 넥밴드 모드
                 !isPhoneMicMode && isEspConnected && isServerConnected -> "넥밴드 모드 실행 중"
-                // 3. 서버 연결 안됨 (마이크 활성화 시도)
                 (isPhoneMicMode || isEspConnected) && !isServerConnected -> "서버 연결 대기 중..."
-                // 4. 넥밴드 연결 안됨 (넥밴드 모드)
                 !isPhoneMicMode && !isEspConnected -> "넥밴드 연결 대기 중..."
-                // 5. 기본 상태
                 else -> "SmartNeckBand 실행 중"
             }
-
-            // 포그라운드 알림 업데이트
             updateNotification(statusText)
         }
     }
-    // ▲▲▲ 추가/수정된 코드 ▲▲▲
 
     private fun createNotificationChannel() {
         val name = "SmartNeckBand 통신 서비스"
@@ -707,7 +713,7 @@ class CommunicationService : LifecycleService() {
         }
         val pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, pendingIntentFlags)
         return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
-            .setContentTitle("SmartNeckBand") // ▼▼▼ 타이틀을 "실행 중" -> 앱 이름으로 변경 ▼▼▼
+            .setContentTitle("SmartNeckBand")
             .setContentText(contentText)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
@@ -717,17 +723,14 @@ class CommunicationService : LifecycleService() {
     }
 
     private fun updateNotification(contentText: String) {
-        // ▼▼▼ 추가/수정된 코드 (백그라운드 실행 여부 확인) ▼▼▼
         lifecycleScope.launch {
             if (!settingsRepository.isBackgroundExecutionEnabledFlow.first()) {
                 Log.d(TAG_SERVICE, "Background execution disabled, skipping notification update.")
                 return@launch
             }
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            // NOTIFICATION_ID (1)번 알림을 createNotification(contentText)로 생성된 내용으로 교체
             notificationManager.notify(NOTIFICATION_ID, createNotification(contentText))
         }
-        // ▲▲▲ 추가/수정된 코드 ▲▲▲
     }
 
     private fun sendAlertNotification(title: String, contentText: String) {
@@ -789,7 +792,10 @@ class CommunicationService : LifecycleService() {
         }
         try {
             resolver.openOutputStream(audioUri)?.use { outputStream ->
-                val header = createWavHeader(pcmData.size)
+                // ▼▼▼ 수정된 코드 (10k -> 16k 변환) ▼▼▼
+                // 16kHz로 리샘플링된 pcmData가 저장되므로, 헤더도 16kHz로 생성
+                val header = createWavHeader(pcmData.size, 16000)
+                // ▲▲▲ 수정된 코드 ▲▲▲
                 outputStream.write(header)
                 outputStream.write(pcmData)
             }
@@ -804,10 +810,11 @@ class CommunicationService : LifecycleService() {
         }
     }
 
-    private fun createWavHeader(dataSize: Int): ByteArray {
+    // ▼▼▼ 수정된 코드 (10k -> 16k 변환) ▼▼▼
+    private fun createWavHeader(dataSize: Int, sampleRate: Int): ByteArray {
+        // ▲▲▲ 수정된 코드 ▲▲▲
         val headerSize = 44
         val totalSize = dataSize + headerSize - 8
-        val sampleRate = 10000
         val channels = 1
         val bitsPerSample = 16
         val byteRate = sampleRate * channels * bitsPerSample / 8
@@ -819,7 +826,7 @@ class CommunicationService : LifecycleService() {
         header.putInt(16)
         header.putShort(1)
         header.putShort(channels.toShort())
-        header.putInt(sampleRate)
+        header.putInt(sampleRate) // 16000 전달됨
         header.putInt(byteRate)
         header.putShort((channels * bitsPerSample / 8).toShort())
         header.putShort(bitsPerSample.toShort())
@@ -833,4 +840,54 @@ class CommunicationService : LifecycleService() {
             Toast.makeText(applicationContext, message, Toast.LENGTH_SHORT).show()
         }
     }
+
+    // ▼▼▼ 신규 추가 함수 (10k -> 16k 리샘플러) ▼▼▼
+    /**
+     * 10kHz 16bit PCM(ByteArray)을 16kHz 16bit PCM(ByteArray)로 변환합니다.
+     * @param input 10kHz PCM 데이터
+     * @return 16kHz PCM 데이터
+     */
+    private fun resample10kTo16k(input: ByteArray): ByteArray {
+        try {
+            // 1. ByteArray -> ShortArray 변환 (16-bit little-endian)
+            val inputBuffer = ByteBuffer.wrap(input).order(ByteOrder.LITTLE_ENDIAN)
+            val numSamples = input.size / 2
+            if (numSamples == 0) return ByteArray(0)
+
+            val inputSamples = ShortArray(numSamples)
+            for (i in 0 until numSamples) {
+                inputSamples[i] = inputBuffer.short
+            }
+
+            // 2. 출력 샘플 수 계산 (10:16 = 5:8 비율)
+            val outputNumSamples = (numSamples * 8.0 / 5.0).toInt()
+            val outputSamples = ShortArray(outputNumSamples)
+
+            // 3. 선형 보간 (Linear Interpolation) 수행
+            for (i in 0 until outputNumSamples) {
+                val in_idx_float = i * 5.0 / 8.0 // 16k 인덱스 -> 10k 인덱스 매핑
+                val in_idx_int = in_idx_float.toInt()
+                val fraction = in_idx_float - in_idx_int
+
+                val s1 = inputSamples[in_idx_int]
+                // 경계 값 처리: 마지막 샘플을 초과하지 않도록 함
+                val s2 = if (in_idx_int + 1 < numSamples) inputSamples[in_idx_int + 1] else s1
+
+                // 보간: s1 + (s2 - s1) * fraction
+                outputSamples[i] = (s1 + (s2 - s1) * fraction).toInt().toShort()
+            }
+
+            // 4. ShortArray -> ByteArray 변환
+            val outputBuffer = ByteBuffer.allocate(outputNumSamples * 2).order(ByteOrder.LITTLE_ENDIAN)
+            for (sample in outputSamples) {
+                outputBuffer.putShort(sample)
+            }
+            return outputBuffer.array()
+
+        } catch (e: Exception) {
+            Log.e(TAG_SERVICE, "Resampling 10k->16k failed", e)
+            return ByteArray(0) // 오류 발생 시 빈 배열 반환
+        }
+    }
+    // ▲▲▲ 신규 추가 함수 ▲▲▲
 }
