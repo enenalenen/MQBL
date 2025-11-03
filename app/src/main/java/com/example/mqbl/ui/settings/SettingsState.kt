@@ -5,5 +5,10 @@ package com.example.mqbl.ui.settings
  */
 data class SettingsUiState(
     val isBackgroundExecutionEnabled: Boolean = true,
-    val isRecording: Boolean = false // --- ▼▼▼ 녹음 상태 플래그 추가 ▼▼▼ ---
+    val isRecording: Boolean = false,
+    val isPhoneMicModeEnabled: Boolean = false,
+
+    // ▼▼▼ 추가/수정된 코드 (마이크 민감도 UI 상태) ▼▼▼
+    val micSensitivity: Int = 5 // 1(둔감) ~ 10(민감), 기본값 5
+    // ▲▲▲ 추가/수정된 코드 ▲▲▲
 )

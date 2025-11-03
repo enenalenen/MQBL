@@ -19,10 +19,11 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 private const val TAG = "SettingsViewModel"
 
-class SettingsViewModel(application: Application) : AndroidViewModel(application) {
+class SettingsViewModel(application : Application) : AndroidViewModel(application) {
 
     private val settingsRepository = SettingsRepository.getInstance(application)
     private val _binder = MutableStateFlow<CommunicationService.LocalBinder?>(null)
@@ -65,6 +66,16 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             .onEach { isEnabled -> _uiState.update { it.copy(isBackgroundExecutionEnabled = isEnabled) } }
             .launchIn(viewModelScope)
 
+        settingsRepository.isPhoneMicModeEnabledFlow
+            .onEach { isEnabled -> _uiState.update { it.copy(isPhoneMicModeEnabled = isEnabled) } }
+            .launchIn(viewModelScope)
+
+        // ▼▼▼ 추가/수정된 코드 (민감도 값 구독) ▼▼▼
+        settingsRepository.micSensitivityFlow
+            .onEach { sensitivity -> _uiState.update { it.copy(micSensitivity = sensitivity) } }
+            .launchIn(viewModelScope)
+        // ▲▲▲ 추가/수정된 코드 ▲▲▲
+
         settingsRepository.customKeywordsFlow
             .onEach { keywords -> _customKeywords.value = keywords }
             .launchIn(viewModelScope)
@@ -99,9 +110,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             if (isServerConnected) {
                 val command = "CMD_UPDATE_KEYWORDS:${_customKeywords.value}"
                 _binder.value?.getService()?.sendToServer(command)
-                showToast("단어가 로컬 및 서버에 저장되었습니다.")
+                showToast("단어가 서버에 저장되었습니다.") // ▼ 문구 수정 ▼
             } else {
-                showToast("단어가 로컬에 저장되었습니다. (서버 연결 안됨)")
+                showToast("단어가 로컬에만 저장되었습니다. (서버 연결 안됨)")
             }
         }
     }
@@ -129,6 +140,40 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    // --- ▼▼▼ 추가/수정된 코드 (민감도 콜백 함수 구현) ▼▼▼ ---
+    /**
+     * 슬라이더가 움직이는 동안 호출됨. UI 상태만 업데이트.
+     */
+    fun onMicSensitivityChange(newValue: Float) {
+        _uiState.update { it.copy(micSensitivity = newValue.roundToInt()) }
+    }
+
+    /**
+     * 슬라이더 조작이 끝났을 때 호출됨. 값 저장 및 서버 전송.
+     */
+    fun onMicSensitivityChangeFinished() {
+        viewModelScope.launch {
+            val finalValue = _uiState.value.micSensitivity
+
+            // 1. 로컬에 저장
+            settingsRepository.setMicSensitivity(finalValue)
+
+            // 2. 서버에 전송 (5/5 단계에서 구현할 함수)
+            val command = "CMD_SET_SENSITIVITY:$finalValue"
+            _binder.value?.getService()?.sendToServer(command)
+
+            // 3. 사용자 피드백
+            val isServerConnected = _binder.value?.getServerTcpUiStateFlow()?.first()?.isConnected ?: false
+            if (isServerConnected) {
+                showToast("마이크 민감도가 $finalValue (으)로 설정되어 서버에 전송되었습니다.")
+            } else {
+                showToast("마이크 민감도가 $finalValue (으)로 로컬에 저장되었습니다. (서버 연결 안됨)")
+            }
+        }
+    }
+    // --- ▲▲▲ 추가/수정된 코드 ▲▲▲ ---
+
+
     // --- Service Actions ---
     fun connectToEsp32() {
         val port = _esp32Port.value.toIntOrNull()
@@ -148,15 +193,29 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun sendVibrationValue(value: Int) { _binder.value?.getService()?.sendVibrationValueToEsp32(value) }
     fun sendCommandToEsp32(command: String) { _binder.value?.getService()?.sendCommandToEsp32(command) }
 
-    // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-    // 백그라운드 실행 토글 기능을 여기에 명확하게 다시 구현합니다.
-    // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+    fun togglePhoneMicMode(enabled: Boolean) {
+        viewModelScope.launch {
+            val service = _binder.value?.getService() ?: return@launch
+
+            if (enabled) {
+                val success = service.setPhoneMicMode(true)
+                if (success) {
+                    settingsRepository.setPhoneMicMode(true)
+                    showToast("스마트폰 마이크 모드 ON")
+                } else {
+                    settingsRepository.setPhoneMicMode(false)
+                }
+            } else {
+                service.setPhoneMicMode(false)
+                settingsRepository.setPhoneMicMode(false)
+                showToast("스마트폰 마이크 모드 OFF")
+            }
+        }
+    }
+
     fun toggleBackgroundExecution(enabled: Boolean) {
         viewModelScope.launch {
-            // 1. 설정 저장
             settingsRepository.setBackgroundExecution(enabled)
-
-            // 2. 서비스에 적절한 명령 전송
             val serviceIntent = Intent(getApplication(), CommunicationService::class.java).apply {
                 action = if (enabled) {
                     CommunicationService.ACTION_START_FOREGROUND
@@ -167,7 +226,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             getApplication<Application>().startService(serviceIntent)
         }
     }
-    // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
     private fun showToast(message: String){
         Toast.makeText(getApplication(), message, Toast.LENGTH_SHORT).show()

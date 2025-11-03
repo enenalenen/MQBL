@@ -15,13 +15,21 @@ import androidx.compose.ui.unit.sp
 import com.example.mqbl.R
 import com.example.mqbl.ui.main.MainUiState
 import com.example.mqbl.ui.tcp.TcpUiState
+import kotlin.math.roundToInt
 
 @Composable
 fun SettingsScreen(
     // App Settings
     settingsUiState: SettingsUiState,
     onBackgroundExecutionToggled: (Boolean) -> Unit,
+    onPhoneMicModeToggled: (Boolean) -> Unit,
 
+    // ▼▼▼ 추가/수정된 코드 (민감도 슬라이더 콜백) ▼▼▼
+    onMicSensitivityChange: (Float) -> Unit, // 슬라이더가 움직일 때
+    onMicSensitivityChangeFinished: () -> Unit, // 슬라이더 조작이 끝났을 때
+    // ▲▲▲ 추가/수정된 코드 ▲▲▲
+
+    // Custom Keywords
     customKeywords: String,
     onCustomKeywordsChange: (String) -> Unit,
     onSaveCustomKeywords: () -> Unit,
@@ -155,6 +163,46 @@ fun SettingsScreen(
             }
         }
 
+        // --- ▼▼▼ 추가/수정된 코드 (마이크 민감도 UI) ▼▼▼ ---
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("마이크 민감도 (VAD)", style = MaterialTheme.typography.titleMedium)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "값이 높을수록(민감) 작은 소리에도 반응합니다. (기본값: 5)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("둔감 (1)", style = MaterialTheme.typography.labelMedium)
+                        Spacer(Modifier.width(12.dp))
+                        Slider(
+                            value = settingsUiState.micSensitivity.toFloat(),
+                            onValueChange = onMicSensitivityChange,
+                            onValueChangeFinished = onMicSensitivityChangeFinished,
+                            valueRange = 1f..10f,
+                            steps = 8, // 1~10까지 9개의 구간, 즉 8개의 스텝
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Text("민감 (10)", style = MaterialTheme.typography.labelMedium)
+                    }
+                    Text(
+                        text = "현재 값: ${settingsUiState.micSensitivity}",
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
+                }
+            }
+        }
+        // --- ▲▲▲ 추가/수정된 코드 ▲▲▲ ---
+
 
         // --- 감지 단어 설정 섹션 ---
         item {
@@ -177,7 +225,8 @@ fun SettingsScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                     Button(
                         onClick = onSaveCustomKeywords,
-                        modifier = Modifier.align(Alignment.End)
+                        modifier = Modifier.align(Alignment.End),
+                        enabled = serverTcpUiState.isConnected // 서버 연결 시에만 저장 가능
                     ) {
                         Text("단어 저장")
                     }
@@ -232,9 +281,7 @@ fun SettingsScreen(
             }
         }
 
-        // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-        // 사라졌던 '앱 설정' UI 섹션을 여기에 복원했습니다.
-        // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+        // --- 앱 설정 섹션 ---
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
@@ -260,6 +307,29 @@ fun SettingsScreen(
                             onCheckedChange = onBackgroundExecutionToggled
                         )
                     }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("스마트폰 마이크 모드", style = MaterialTheme.typography.bodyLarge)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "이 모드를 켜면 넥밴드 마이크 대신 스마트폰 마이크로 음성을 감지합니다.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Switch(
+                            checked = settingsUiState.isPhoneMicModeEnabled,
+                            onCheckedChange = onPhoneMicModeToggled
+                        )
+                    }
                 }
             }
         }
@@ -272,8 +342,20 @@ fun SettingsScreen(
 fun SettingsScreenPreview() {
     MaterialTheme {
         SettingsScreen(
-            settingsUiState = SettingsUiState(isBackgroundExecutionEnabled = true, isRecording = false),
+            settingsUiState = SettingsUiState(
+                isBackgroundExecutionEnabled = true,
+                isRecording = false,
+                isPhoneMicModeEnabled = true,
+                micSensitivity = 7 // ▼▼▼ 추가 ▼▼▼
+            ),
             onBackgroundExecutionToggled = {},
+            onPhoneMicModeToggled = {},
+
+            // ▼▼▼ 추가/수정된 코드 (미리보기 콜백) ▼▼▼
+            onMicSensitivityChange = {},
+            onMicSensitivityChangeFinished = {},
+            // ▲▲▲ 추가/수정된 코드 ▲▲▲
+
             mainUiState = MainUiState(status = "스마트 넥밴드: 연결됨", espDeviceName = "스마트 넥밴드 (Preview)", isEspConnected = true),
             onSendVibrationValue = {},
             onSendCommand = {},

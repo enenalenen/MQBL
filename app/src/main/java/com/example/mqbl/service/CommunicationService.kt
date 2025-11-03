@@ -1,5 +1,6 @@
 package com.example.mqbl.service
 
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,6 +8,10 @@ import android.app.PendingIntent
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
 import android.os.Binder
 import android.os.Build
 import android.os.Environment
@@ -15,6 +20,7 @@ import android.provider.MediaStore
 import android.util.Log
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import com.example.mqbl.MainActivity
@@ -64,6 +70,11 @@ private const val ALERT_NOTIFICATION_ID = 2
 private const val NOTIFICATION_CHANNEL_ID = "MQBL_Communication_Channel"
 private const val NOTIFICATION_ID = 1
 private const val SOCKET_TIMEOUT = 5000 // ms
+
+// ESP32 및 서버와 샘플링 속도를 일치시킴
+private const val LOCAL_AUDIO_SAMPLE_RATE = 10000
+private const val LOCAL_AUDIO_CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
+private const val LOCAL_AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
 // -----------------
 
 class CommunicationService : LifecycleService() {
@@ -81,6 +92,9 @@ class CommunicationService : LifecycleService() {
         fun getIsRecordingFlow(): StateFlow<Boolean> = _isRecording.asStateFlow()
         fun getServerTcpUiStateFlow(): StateFlow<TcpUiState> = _serverTcpUiState.asStateFlow()
         fun getReceivedServerTcpMessagesFlow(): StateFlow<List<TcpMessageItem>> = _receivedServerTcpMessages.asStateFlow()
+        // ▼▼▼ 추가/수정된 코드 (ViewModel이 구독할 Flow) ▼▼▼
+        fun getIsPhoneMicModeEnabledFlow(): StateFlow<Boolean> = _isPhoneMicModeEnabled.asStateFlow()
+        // ▲▲▲ 추가/수정된 코드 ▲▲▲
     }
     private val binder = LocalBinder()
 
@@ -98,6 +112,12 @@ class CommunicationService : LifecycleService() {
     // 녹음 관련 변수
     private val _isRecording = MutableStateFlow(false)
     private var audioRecordingStream: ByteArrayOutputStream? = null
+
+    // 스마트폰 마이크 관련 변수
+    private val _isPhoneMicModeEnabled = MutableStateFlow(false)
+    private var localAudioRecordingJob: Job? = null
+    private var audioRecord: AudioRecord? = null
+    private var localAudioBufferSize = 0
 
     // --- PC 서버 TCP/IP ---
     private var serverAudioSocket: Socket? = null // 오디오 소켓
@@ -135,6 +155,15 @@ class CommunicationService : LifecycleService() {
             }
         }
 
+        lifecycleScope.launch {
+            settingsRepository.isPhoneMicModeEnabledFlow.first().let { enabled ->
+                _isPhoneMicModeEnabled.value = enabled
+                if (enabled) {
+                    startLocalAudioRecording()
+                }
+            }
+        }
+
         createNotificationChannel()
         listenForServerToEsp32Messages()
     }
@@ -146,21 +175,21 @@ class CommunicationService : LifecycleService() {
 
         when (action) {
             ACTION_START_FOREGROUND -> {
-                startForeground(NOTIFICATION_ID, createNotification("서비스 실행 중..."))
+                // ▼▼▼ 추가/수정된 코드 (포그라운드 시작 시에도 상태 업데이트) ▼▼▼
+                updateNotificationCombined()
+                // ▲▲▲ 추가/수정된 코드 ▲▲▲
                 Log.i(TAG_SERVICE, "Foreground service started explicitly.")
             }
             ACTION_STOP_FOREGROUND -> {
                 Log.i(TAG_SERVICE, "Stopping foreground service notification...")
                 stopForeground(STOP_FOREGROUND_REMOVE)
-                // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-                // 이 줄을 삭제하여 서비스가 완전히 종료되는 것을 방지합니다.
-                // stopSelf()
-                // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
             }
             else -> {
                 lifecycleScope.launch {
                     if (settingsRepository.isBackgroundExecutionEnabledFlow.first()) {
-                        startForeground(NOTIFICATION_ID, createNotification("서비스 실행 중..."))
+                        // ▼▼▼ 추가/수정된 코드 (서비스 자동 시작 시에도 상태 업데이트) ▼▼▼
+                        updateNotificationCombined()
+                        // ▲▲▲ 추가/수정된 코드 ▲▲▲
                         Log.i(TAG_SERVICE, "Service started, background execution is ENABLED.")
                     } else {
                         Log.i(TAG_SERVICE, "Service started, background execution is DISABLED.")
@@ -180,6 +209,7 @@ class CommunicationService : LifecycleService() {
         super.onDestroy()
         requestEsp32Disconnect()
         requestServerTcpDisconnect(userRequested = false)
+        stopLocalAudioRecording()
         stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
@@ -212,7 +242,56 @@ class CommunicationService : LifecycleService() {
         sendToServerCommand(message)
     }
 
+    /**
+     * 스마트폰 마이크 모드를 설정합니다.
+     * @param enabled 활성화 여부
+     * @return 권한이 있고 작업이 성공하면 true, 권한이 없으면 false 반환
+     */
+    fun setPhoneMicMode(enabled: Boolean): Boolean {
+        if (_isPhoneMicModeEnabled.value == enabled) return true // 이미 원하는 상태임
+
+        if (enabled) {
+            // --- 모드를 켜려고 할 때 ---
+            // 1. 권한부터 확인
+            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                showToast("오디오 녹음 권한이 없습니다. 앱 설정에서 권한을 허용해주세요.")
+                Log.e(TAG_SERVICE, "setPhoneMicMode(true) failed: RECORD_AUDIO permission not granted.")
+                return false // ViewModel에 실패를 알림
+            }
+
+            // 2. 권한이 있으면 로직 실행
+            _isPhoneMicModeEnabled.value = true
+            if (_isRecording.value) {
+                stopAndSaveAudioRecording()
+            }
+            startLocalAudioRecording()
+            if (_mainUiState.value.isEspConnected) {
+                sendCommandToEsp32("PAUSE_AUDIO")
+            }
+            // ▼▼▼ 추가/수정된 코드 (알림 업데이트) ▼▼▼
+            updateNotificationCombined()
+            // ▲▲▲ 추가/수정된 코드 ▲▲▲
+            return true // ViewModel에 성공을 알림
+
+        } else {
+            // --- 모드를  끌 때 ---
+            _isPhoneMicModeEnabled.value = false
+            stopLocalAudioRecording()
+            if (_mainUiState.value.isEspConnected) {
+                sendCommandToEsp32("RESUME_AUDIO")
+            }
+            // ▼▼▼ 추가/수정된 코드 (알림 업데이트) ▼▼▼
+            updateNotificationCombined()
+            // ▲▲▲ 추가/수정된 코드 ▲▲▲
+            return true // ViewModel에 성공을 알림
+        }
+    }
+
     fun startAudioRecording() {
+        if (_isPhoneMicModeEnabled.value) {
+            showToast("스마트폰 마이크 모드 중에는 파일 녹음을 할 수 없습니다.")
+            return
+        }
         if (!_mainUiState.value.isEspConnected) {
             showToast("스마트 넥밴드가 연결되지 않아 녹음을 시작할 수 없습니다.")
             return
@@ -272,13 +351,17 @@ class CommunicationService : LifecycleService() {
                 _mainUiState.update { it.copy(status = "스마트 넥밴드: 연결됨", isConnecting = false, isEspConnected = true, espDeviceName = "스마트 넥밴드") }
                 updateNotificationCombined()
 
+                if (_isPhoneMicModeEnabled.value) {
+                    sendToEsp32("PAUSE_AUDIO")
+                } else {
+                    sendToEsp32("RESUME_AUDIO")
+                }
+
                 val inputStream = socket.getInputStream()
                 val outputStream = socket.getOutputStream()
                 val buffer = ByteArray(2048)
 
-                // Single loop for both reading and writing
                 while (currentCoroutineContext().isActive) {
-                    // 1. Check for and handle outgoing messages (non-blocking)
                     val messageToSend = esp32OutgoingMessages.tryReceive().getOrNull()
                     if (messageToSend != null) {
                         try {
@@ -287,11 +370,10 @@ class CommunicationService : LifecycleService() {
                             Log.i(TAG_ESP32_TCP, "Sent: $messageToSend")
                         } catch (e: IOException) {
                             Log.e(TAG_ESP32_TCP, "Write failed, closing connection.", e)
-                            break // Exit loop on write error
+                            break
                         }
                     }
 
-                    // 2. Check for and handle incoming audio data (non-blocking)
                     if (inputStream.available() > 0) {
                         val bytesRead = inputStream.read(buffer)
                         if (bytesRead > 0) {
@@ -300,16 +382,17 @@ class CommunicationService : LifecycleService() {
                             if (_isRecording.value) {
                                 audioRecordingStream?.write(audioData)
                             }
-                            if (_serverTcpUiState.value.isConnected) {
+
+                            if (_serverTcpUiState.value.isConnected && !_isPhoneMicModeEnabled.value) {
                                 sendAudioToServer(audioData)
                             }
                         } else if (bytesRead < 0) {
                             Log.w(TAG_ESP32_TCP, "Read -1, connection closed by peer.")
-                            break // Exit loop
+                            break
                         }
                     }
 
-                    delay(5) // Prevent busy-waiting, allow other tasks to run
+                    delay(5)
                 }
             } catch (e: Exception) {
                 if (currentCoroutineContext().isActive) {
@@ -338,14 +421,12 @@ class CommunicationService : LifecycleService() {
                 _serverTcpUiState.update { it.copy(connectionStatus = "PC서버: 연결 중...", errorMessage = null) }
                 updateNotificationCombined()
 
-                // 1. 오디오 소켓 연결 (기존 포트)
                 serverAudioSocket = Socket()
                 serverAudioSocket!!.connect(InetSocketAddress(ip, port), SOCKET_TIMEOUT)
                 serverAudioOutputStream = serverAudioSocket!!.getOutputStream()
                 serverAudioBufferedReader = BufferedReader(InputStreamReader(serverAudioSocket!!.getInputStream()))
                 Log.i(TAG_SERVER_TCP, "Audio socket connected to $ip:$port")
 
-                // 2. 명령어 소켓 연결 (포트 + 1)
                 val commandPort = port + 1
                 serverCommandSocket = Socket()
                 serverCommandSocket!!.connect(InetSocketAddress(ip, commandPort), SOCKET_TIMEOUT)
@@ -355,7 +436,6 @@ class CommunicationService : LifecycleService() {
                 _serverTcpUiState.update { it.copy(isConnected = true, connectionStatus = "서버: 연결됨", errorMessage = null) }
                 updateNotificationCombined()
 
-                // 3. 오디오 소켓에서 키워드 수신 시작
                 startServerKeywordReceiveLoop()
 
             } catch (e: Exception) {
@@ -368,7 +448,6 @@ class CommunicationService : LifecycleService() {
     }
 
     private fun startServerKeywordReceiveLoop() {
-        // 기존 startServerReceiveLoop의 이름을 변경하고, 오디오 소켓만 사용하도록 함
         serverConnectionJob = lifecycleScope.launch(Dispatchers.IO) {
             while (this.isActive && serverAudioSocket?.isConnected == true) {
                 try {
@@ -405,7 +484,6 @@ class CommunicationService : LifecycleService() {
     }
 
     private fun sendToServerCommand(message: String) {
-        // sendToServerTcp -> sendToServerCommand로 이름 변경 및 명령어 소켓 사용
         if (serverCommandSocket?.isConnected != true || serverCommandOutputStream == null) {
             showToast("서버 명령어 채널에 연결되지 않았습니다.")
             return
@@ -417,7 +495,6 @@ class CommunicationService : LifecycleService() {
                 val sentItem = TcpMessageItem(source = "앱 -> 서버 (명령어)", payload = message)
                 _receivedServerTcpMessages.update { list -> (listOf(sentItem) + list).take(MAX_TCP_LOG_SIZE) }
             } catch (e: Exception) {
-                // 명령어 전송 실패는 전체 연결을 끊을 필요는 없음
                 Log.e(TAG_SERVER_TCP, "Failed to send command", e)
                 showToast("서버로 명령어 전송 실패")
             }
@@ -436,7 +513,6 @@ class CommunicationService : LifecycleService() {
     }
 
     private fun closeServerSockets() {
-        // 두 소켓을 모두 닫도록 수정
         try { serverAudioOutputStream?.close() } catch (e: IOException) {}
         try { serverAudioBufferedReader?.close() } catch (e: IOException) {}
         try { serverAudioSocket?.close() } catch (e: IOException) {}
@@ -447,31 +523,101 @@ class CommunicationService : LifecycleService() {
         Log.d(TAG_SERVER_TCP, "Server sockets closed.")
     }
 
+    @SuppressLint("MissingPermission")
+    private fun startLocalAudioRecording() {
+        if (localAudioRecordingJob?.isActive == true) return
+
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            Log.e(TAG_SERVICE, "startLocalAudioRecording called, but permission is missing!")
+            lifecycleScope.launch {
+                settingsRepository.setPhoneMicMode(false)
+            }
+            return
+        }
+
+        try {
+            localAudioBufferSize = AudioRecord.getMinBufferSize(LOCAL_AUDIO_SAMPLE_RATE, LOCAL_AUDIO_CHANNEL_CONFIG, LOCAL_AUDIO_FORMAT)
+            if (localAudioBufferSize == AudioRecord.ERROR_BAD_VALUE) {
+                showToast("오디오 녹음 장치를 초기화할 수 없습니다. (샘플링 속도 10kHz 미지원)")
+                Log.e(TAG_SERVICE, "Device does not support 10000Hz sampling rate.")
+                return
+            }
+
+            audioRecord = AudioRecord(
+                MediaRecorder.AudioSource.MIC,
+                LOCAL_AUDIO_SAMPLE_RATE,
+                LOCAL_AUDIO_CHANNEL_CONFIG,
+                LOCAL_AUDIO_FORMAT,
+                localAudioBufferSize
+            )
+
+            if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
+                showToast("오디오 녹음 장치 초기화 실패")
+                Log.e(TAG_SERVICE, "AudioRecord initialization failed.")
+                return
+            }
+
+            audioRecord?.startRecording()
+            Log.i(TAG_SERVICE, "Smartphone Mic Recording Started (for Server). Buffer size: $localAudioBufferSize")
+
+            localAudioRecordingJob = lifecycleScope.launch(Dispatchers.IO) {
+                val buffer = ByteArray(localAudioBufferSize)
+                while (isActive) {
+                    val bytesRead = audioRecord?.read(buffer, 0, buffer.size) ?: 0
+                    if (bytesRead > 0) {
+                        if (_serverTcpUiState.value.isConnected && _isPhoneMicModeEnabled.value) {
+                            sendAudioToServer(buffer.copyOf(bytesRead))
+                        }
+                    } else if (bytesRead < 0) {
+                        Log.e(TAG_SERVICE, "Error reading from AudioRecord: $bytesRead")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG_SERVICE, "Failed to start local audio recording", e)
+            showToast("마이크 시작 오류: ${e.message}")
+            stopLocalAudioRecording()
+        }
+    }
+
+    private fun stopLocalAudioRecording() {
+        if (localAudioRecordingJob?.isActive == true) {
+            localAudioRecordingJob?.cancel()
+            localAudioRecordingJob = null
+        }
+        if (audioRecord != null) {
+            try {
+                if (audioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+                    audioRecord?.stop()
+                }
+                audioRecord?.release()
+                Log.i(TAG_SERVICE, "Smartphone Mic Recording Stopped.")
+            } catch (e: IllegalStateException) {
+                Log.e(TAG_SERVICE, "Error stopping AudioRecord", e)
+            }
+            audioRecord = null
+        }
+    }
+
     // --- Hub Listeners & Notifications ---
     private fun listenForServerToEsp32Messages() {
         lifecycleScope.launch {
             CommunicationHub.serverToEsp32Flow.collect { message ->
-                // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-                // 이 함수 전체를 아래 내용으로 교체합니다.
-                // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
                 Log.i(TAG_SERVICE, "Service received message from Hub: $message")
 
                 var commandToSendToEsp32: String? = null
                 val receivedKeywords = message.trim().split(',').map { it.trim() }.filter { it.isNotEmpty() }
 
-                // 경고 키워드가 하나라도 있는지 먼저 확인
                 val alarmKeywordsDetected = receivedKeywords.filter { received ->
                     isAlarmKeyword(received.lowercase())
                 }
 
                 if (alarmKeywordsDetected.isNotEmpty()) {
-                    // 경고 키워드가 있으면, 가장 우선적으로 양쪽 진동 처리
                     commandToSendToEsp32 = "VIBRATE_BOTH"
                     val description = "'${alarmKeywordsDetected.joinToString()}' 경고 감지됨"
                     addDetectionEvent(description)
                     sendAlertNotification("🚨 위험 감지!", description)
                 } else {
-                    // 경고 키워드가 없으면, 사용자 정의 단어가 있는지 확인
                     val customKeywordsDetected = receivedKeywords.filter { received ->
                         customKeywords.any { custom -> received.equals(custom, ignoreCase = true) }
                     }
@@ -483,7 +629,6 @@ class CommunicationService : LifecycleService() {
                     }
                 }
 
-                // 최종적으로 결정된 명령어가 있으면 ESP32로 전송
                 commandToSendToEsp32?.let { command ->
                     if (_mainUiState.value.isEspConnected) {
                         Log.d(TAG_ESP32_TCP, "Service sending command ('$command') to ESP32.")
@@ -492,7 +637,6 @@ class CommunicationService : LifecycleService() {
                         Log.w(TAG_ESP32_TCP, "Service cannot send command to ESP32: Not connected.")
                     }
                 }
-                // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
             }
         }
     }
@@ -501,14 +645,40 @@ class CommunicationService : LifecycleService() {
         return keyword in listOf("siren", "horn", "boom")
     }
 
+    // ▼▼▼ 추가/수정된 코드 (알림 텍스트 로직 변경) ▼▼▼
     private fun updateNotificationCombined() {
         lifecycleScope.launch {
-            if (!settingsRepository.isBackgroundExecutionEnabledFlow.first()) return@launch
-            val espStatus = _mainUiState.value.espDeviceName ?: "끊김"
-            val serverStatusText = _serverTcpUiState.value.connectionStatus
-            updateNotification("스마트 넥밴드: $espStatus, $serverStatusText")
+            // 백그라운드 실행이 비활성화 상태면 알림을 아예 띄우지 않음 (혹은 기본 텍스트)
+            if (!settingsRepository.isBackgroundExecutionEnabledFlow.first()) {
+                // 만약 이 함수가 호출된 시점에 알림이 떠있다면 지움
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                return@launch
+            }
+
+            // Get all 3 states
+            val isPhoneMicMode = _isPhoneMicModeEnabled.value
+            val isServerConnected = _serverTcpUiState.value.isConnected
+            val isEspConnected = _mainUiState.value.isEspConnected
+
+            // 사용자가 요청한 알림 텍스트 로직 적용
+            val statusText = when {
+                // 1. 스마트폰 마이크 모드
+                isPhoneMicMode && isServerConnected -> "스마트폰 마이크 모드 실행 중"
+                // 2. 넥밴드 모드
+                !isPhoneMicMode && isEspConnected && isServerConnected -> "넥밴드 모드 실행 중"
+                // 3. 서버 연결 안됨 (마이크 활성화 시도)
+                (isPhoneMicMode || isEspConnected) && !isServerConnected -> "서버 연결 대기 중..."
+                // 4. 넥밴드 연결 안됨 (넥밴드 모드)
+                !isPhoneMicMode && !isEspConnected -> "넥밴드 연결 대기 중..."
+                // 5. 기본 상태
+                else -> "SmartNeckBand 실행 중"
+            }
+
+            // 포그라운드 알림 업데이트
+            updateNotification(statusText)
         }
     }
+    // ▲▲▲ 추가/수정된 코드 ▲▲▲
 
     private fun createNotificationChannel() {
         val name = "SmartNeckBand 통신 서비스"
@@ -537,7 +707,7 @@ class CommunicationService : LifecycleService() {
         }
         val pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, pendingIntentFlags)
         return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
-            .setContentTitle("SmartNeckBand 실행 중")
+            .setContentTitle("SmartNeckBand") // ▼▼▼ 타이틀을 "실행 중" -> 앱 이름으로 변경 ▼▼▼
             .setContentText(contentText)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
@@ -547,8 +717,17 @@ class CommunicationService : LifecycleService() {
     }
 
     private fun updateNotification(contentText: String) {
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.notify(NOTIFICATION_ID, createNotification(contentText))
+        // ▼▼▼ 추가/수정된 코드 (백그라운드 실행 여부 확인) ▼▼▼
+        lifecycleScope.launch {
+            if (!settingsRepository.isBackgroundExecutionEnabledFlow.first()) {
+                Log.d(TAG_SERVICE, "Background execution disabled, skipping notification update.")
+                return@launch
+            }
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            // NOTIFICATION_ID (1)번 알림을 createNotification(contentText)로 생성된 내용으로 교체
+            notificationManager.notify(NOTIFICATION_ID, createNotification(contentText))
+        }
+        // ▲▲▲ 추가/수정된 코드 ▲▲▲
     }
 
     private fun sendAlertNotification(title: String, contentText: String) {

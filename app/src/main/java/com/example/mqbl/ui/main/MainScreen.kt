@@ -1,6 +1,7 @@
 package com.example.mqbl.ui.main
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -16,13 +17,18 @@ import androidx.compose.ui.unit.sp
 import java.util.UUID
 
 // --- 상태 표현을 위한 데이터 클래스 정의 ---
+// ▼▼▼ 추가/수정된 코드 (데이터 클래스 수정) ▼▼▼
 data class MainUiState(
-    val status: String = "상태: 대기 중",
+    val status: String = "음성 인식 비활성화", // ViewModel이 이 텍스트를 설정함
+    val isRecognitionActive: Boolean = false, // 원의 색상을 결정함
+
+    // 기존 필드 (참조용)
     val espDeviceName: String? = null,
     val isEspConnected: Boolean = false,
     val isConnecting: Boolean = false,
     val connectError: String? = null
 )
+// ▲▲▲ 추가/수정된 코드 ▲▲▲
 
 data class DetectionEvent(
     val id: UUID = UUID.randomUUID(),
@@ -49,25 +55,29 @@ fun MainScreen(
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        if (uiState.isEspConnected) {
+        // ▼▼▼ 추가/수정된 코드 (상태 표시줄 UI 변경) ▼▼▼
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // --- 초록색/빨간색 상태 원 ---
+            Canvas(modifier = Modifier.size(14.dp)) {
+                drawCircle(
+                    color = if (uiState.isRecognitionActive) Color(0xFF4CAF50) /* 초록색 */ else Color(0xFFF44336) /* 빨간색 */
+                )
+            }
+
+            Spacer(modifier = Modifier.width(10.dp))
+
+            // --- 상태 텍스트 ---
             Text(
-                "연결됨: ${uiState.espDeviceName}",
+                text = uiState.status,
                 style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-        } else if (uiState.isConnecting) {
-            Text(
-                "연결 중...",
-                style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-        } else {
-            Text(
-                "연결되지 않음. 넥밴드에 연결하세요.",
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(bottom = 8.dp)
+                modifier = Modifier.padding(bottom = 0.dp) // 하단 패딩 제거
             )
         }
+        // ▲▲▲ 추가/수정된 코드 ▲▲▲
+
         Spacer(modifier = Modifier.height(16.dp))
 
         // --- '최근 감지된 음성' 로그 ---
@@ -151,7 +161,14 @@ private fun LogItem(description: String, timestamp: String, isDarkTheme: Boolean
 fun MainScreenPreview() {
     MaterialTheme {
         MainScreen(
-            uiState = MainUiState(status = "상태", isEspConnected = true, espDeviceName = "스마트 넥밴드 (Preview)"),
+            // ▼▼▼ 미리보기 UI 상태 수정 ▼▼▼
+            uiState = MainUiState(
+                status = "음성 인식 활성화 : 넥밴드 모드",
+                isRecognitionActive = true,
+                isEspConnected = true,
+                espDeviceName = "스마트 넥밴드 (Preview)"
+            ),
+            // ▲▲▲ 미리보기 UI 상태 수정 ▲▲▲
             detectionLog = listOf(DetectionEvent(description = "사이렌 감지됨 (미리보기)", timestamp = "12:34:56")),
             customSoundLog = listOf(CustomSoundEvent(description = "사용자 단어 감지됨 (미리보기)", timestamp = "12:35:00")),
         )

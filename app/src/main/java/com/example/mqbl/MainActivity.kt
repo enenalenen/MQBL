@@ -97,6 +97,9 @@ fun MainAppNavigation() {
                 permissionsToRequest.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
             }
         }
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            permissionsToRequest.add(Manifest.permission.RECORD_AUDIO)
+        }
         if (permissionsToRequest.isNotEmpty()){
             permissionLauncher.launch(permissionsToRequest.toTypedArray())
         }
@@ -158,6 +161,12 @@ fun MainAppNavigation() {
                 SettingsScreen(
                     settingsUiState = settingsUiState,
                     onBackgroundExecutionToggled = settingsViewModel::toggleBackgroundExecution,
+                    onPhoneMicModeToggled = settingsViewModel::togglePhoneMicMode,
+
+                    // ▼▼▼ 추가/수정된 코드 (빠졌던 두 줄 추가) ▼▼T
+                    onMicSensitivityChange = settingsViewModel::onMicSensitivityChange,
+                    onMicSensitivityChangeFinished = settingsViewModel::onMicSensitivityChangeFinished,
+                    // ▲▲▲ 추가/수정된 코드 ▲▲▲
 
                     customKeywords = customKeywords,
                     onCustomKeywordsChange = settingsViewModel::updateCustomKeywords,

@@ -28,6 +28,27 @@ class SettingsRepository private constructor(context: Context) {
     private val _esp32Port = MutableStateFlow(getEsp32Port())
     val esp32PortFlow: StateFlow<String> = _esp32Port.asStateFlow()
 
+    // ▼▼▼ 추가/수정된 코드 (마이크 민감도 Flow) ▼▼▼
+    private val _micSensitivity = MutableStateFlow(getMicSensitivity())
+    val micSensitivityFlow: StateFlow<Int> = _micSensitivity.asStateFlow()
+    // ▲▲▲ 추가/수정된 코드 ▲▲▲
+
+    // ▼▼▼ 추가/수정된 코드 (폰 마이크 모드 Flow) ▼▼▼
+    private val _isPhoneMicModeEnabled = MutableStateFlow(isPhoneMicModeEnabled())
+    val isPhoneMicModeEnabledFlow: StateFlow<Boolean> = _isPhoneMicModeEnabled.asStateFlow()
+    // ▲▲▲ 추가/수정된 코드 ▲▲▲
+
+    // ▼▼▼ 추가/수정된 코드 (폰 마이크 모드 Get/Set) ▼▼▼
+    fun isPhoneMicModeEnabled(): Boolean {
+        return prefs.getBoolean(KEY_PHONE_MIC_MODE, false) // 기본값 false
+    }
+
+    fun setPhoneMicMode(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_PHONE_MIC_MODE, enabled).apply()
+        _isPhoneMicModeEnabled.value = enabled
+    }
+    // ▲▲▲ 추가/수정된 코드 ▲▲▲
+
     fun getEsp32Ip(): String {
         return prefs.getString(KEY_ESP32_IP, "192.168.43.101") ?: "192.168.43.101"
     }
@@ -74,9 +95,6 @@ class SettingsRepository private constructor(context: Context) {
     }
 
     fun isBackgroundExecutionEnabled(): Boolean {
-        // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-        // 기본값을 false에서 true로 변경합니다.
-        // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
         return prefs.getBoolean(KEY_BACKGROUND_EXECUTION, true)
     }
 
@@ -84,6 +102,19 @@ class SettingsRepository private constructor(context: Context) {
         prefs.edit().putBoolean(KEY_BACKGROUND_EXECUTION, enabled).apply()
         _isBackgroundExecutionEnabled.value = enabled
     }
+
+    // ▼▼▼ 추가/수정된 코드 (마이크 민감도 Get/Set) ▼▼▼
+    fun getMicSensitivity(): Int {
+        // 기본값을 5 (중간)로 설정
+        return prefs.getInt(KEY_MIC_SENSITIVITY, 5)
+    }
+
+    fun setMicSensitivity(sensitivity: Int) {
+        prefs.edit().putInt(KEY_MIC_SENSITIVITY, sensitivity).apply()
+        _micSensitivity.value = sensitivity
+    }
+    // ▲▲▲ 추가/수정된 코드 ▲▲▲
+
 
     companion object {
         @Volatile
@@ -104,5 +135,10 @@ class SettingsRepository private constructor(context: Context) {
         private const val KEY_TCP_SERVER_PORT = "tcp_server_port"
         private const val KEY_ESP32_IP = "esp32_ip"
         private const val KEY_ESP32_PORT = "esp32_port"
+        private const val KEY_PHONE_MIC_MODE = "phone_mic_mode_enabled"
+
+        // ▼▼▼ 추가/수정된 코드 (새 키) ▼▼▼
+        private const val KEY_MIC_SENSITIVITY = "mic_sensitivity_vad"
+        // ▲▲▲ 추가/수정된 코드 ▲▲▲
     }
 }
