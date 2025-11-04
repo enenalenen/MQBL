@@ -3,7 +3,7 @@ package com.example.mqbl
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.Build
+import android.os.Build // [신규 추가] Build import
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -47,6 +47,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // [수정 없음] 앱이 시작될 때 서비스 시작 (정상)
         startCommunicationService()
         setContent {
             MQBLTheme {
@@ -60,11 +61,23 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+    // [수정] startForegroundService를 사용하도록 이 함수를 변경
+    // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
     private fun startCommunicationService() {
         val serviceIntent = Intent(this, CommunicationService::class.java)
-        startService(serviceIntent)
-        Log.i("MainActivity", "CommunicationService started.")
+        // 안드로이드 8.0 (Oreo) 이상인지 확인
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // 포그라운드 서비스로 시작 (백그라운드 실행 보장)
+            startForegroundService(serviceIntent)
+            Log.i("MainActivity", "CommunicationService started (as ForegroundService).")
+        } else {
+            // 이전 버전에서는 startService 사용
+            startService(serviceIntent)
+            Log.i("MainActivity", "CommunicationService started (as Service).")
+        }
     }
+    // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 }
 
 @Composable
@@ -76,7 +89,7 @@ fun MainAppNavigation() {
     val settingsViewModel: SettingsViewModel = viewModel()
     val tcpViewModel: TcpViewModel = viewModel() // PC 서버 연결용
 
-    // --- 앱 시작 시 필요한 권한 요청 ---
+    // --- [수정 없음] 앱 시작 시 필요한 권한 요청 (기존 로직 유지) ---
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions(),
         onResult = { permissions ->
@@ -130,7 +143,7 @@ fun MainAppNavigation() {
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = Screen.Notifications.route,
+            startDestination = Screen.Notifications.route, // [참고] 기존 코드의 Notifications.route를 유지
             modifier = Modifier.padding(innerPadding)
         ) {
             composable(Screen.Notifications.route) {
@@ -196,6 +209,22 @@ fun MainAppNavigation() {
                     onEsp32Disconnect = settingsViewModel::disconnectFromEsp32
                 )
             }
+
+            // [참고] 기존 코드에 TcpScreen이 없는 것으로 보이나,
+            // 만약 TcpScreen 라우트가 필요하다면 여기에 추가해야 합니다.
+            /*
+            composable(Screen.Tcp.route) { // 예시: Screen.Tcp.route가 "tcp_screen"이라고 가정
+                 // TcpScreen Composable 호출
+                 val tcpUiState by tcpViewModel.tcpUiState.collectAsStateWithLifecycle()
+                 val messages by tcpViewModel.receivedMessages.collectAsStateWithLifecycle()
+                 TcpScreen(
+                     uiState = tcpUiState,
+                     messages = messages,
+                     onSendMessage = tcpViewModel::sendMessage,
+                     onClearMessages = tcpViewModel::clearMessages
+                 )
+            }
+            */
         }
     }
 }
