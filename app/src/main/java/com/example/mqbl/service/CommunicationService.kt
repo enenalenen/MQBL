@@ -622,31 +622,59 @@ class CommunicationService : LifecycleService() {
     private fun listenForServerToEsp32Messages() {
         lifecycleScope.launch {
             CommunicationHub.serverToEsp32Flow.collect { message ->
-                Log.i(TAG_SERVICE, "Service received message from Hub: $message")
+
+                // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+                // [수정] '경고 종료' 메시지를 우선적으로 처리하는 로직 추가
+                // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+                val trimmedMessage = message.trim()
+                Log.i(TAG_SERVICE, "Service received message from Hub: $trimmedMessage")
 
                 var commandToSendToEsp32: String? = null
-                val receivedKeywords = message.trim().split(',').map { it.trim() }.filter { it.isNotEmpty() }
 
-                val alarmKeywordsDetected = receivedKeywords.filter { received ->
-                    isAlarmKeyword(received.lowercase())
-                }
+                when (trimmedMessage) {
+                    // 1. '종료' 메시지 처리
+                    "siren_stopped" -> {
+                        val description = "✅ 사이렌 경고 종료됨"
+                        addDetectionEvent(description)
+                        sendAlertNotification("✅ 상황 종료", "사이렌 경고가 종료되었습니다.")
+                    }
+                    "gas_stopped" -> {
+                        val description = "✅ 가스 경고 종료됨"
+                        addDetectionEvent(description)
+                        sendAlertNotification("✅ 상황 종료", "가스 경고가 종료되었습니다.")
+                    }
 
-                if (alarmKeywordsDetected.isNotEmpty()) {
-                    commandToSendToEsp32 = "VIBRATE_BOTH"
-                    val description = "'${alarmKeywordsDetected.joinToString()}' 경고 감지됨"
-                    addDetectionEvent(description)
-                    sendAlertNotification("🚨 위험 감지!", description)
-                } else {
-                    val customKeywordsDetected = receivedKeywords.filter { received ->
-                        customKeywords.any { custom -> received.equals(custom, ignoreCase = true) }
-                    }
-                    if (customKeywordsDetected.isNotEmpty()) {
-                        commandToSendToEsp32 = "VIBRATE_RIGHT"
-                        val description = "'${customKeywordsDetected.joinToString()}' 단어 감지됨"
-                        addCustomSoundEvent(description)
-                        sendAlertNotification("🗣️ 음성 감지!", description)
+                    // 2. '시작' 또는 '커스텀' 메시지 처리 (기존 로직)
+                    else -> {
+                        val receivedKeywords = trimmedMessage.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+
+                        // [수정] "gas"도 '위험 경고'로 취급하여 VIBRATE_BOTH를 울리도록 수정
+                        val alarmKeywordsDetected = receivedKeywords.filter { received ->
+                            isAlarmKeyword(received.lowercase()) || received.equals("gas", ignoreCase = true)
+                        }
+
+                        if (alarmKeywordsDetected.isNotEmpty()) {
+                            commandToSendToEsp32 = "VIBRATE_BOTH"
+                            val description = "'${alarmKeywordsDetected.joinToString()}' 경고 감지됨"
+                            addDetectionEvent(description)
+                            sendAlertNotification("🚨 위험 감지!", description)
+                        } else {
+                            // '위험 경고'가 아닐 때만 '커스텀 키워드' 검사
+                            val customKeywordsDetected = receivedKeywords.filter { received ->
+                                customKeywords.any { custom -> received.equals(custom, ignoreCase = true) }
+                            }
+                            if (customKeywordsDetected.isNotEmpty()) {
+                                commandToSendToEsp32 = "VIBRATE_RIGHT"
+                                val description = "'${customKeywordsDetected.joinToString()}' 단어 감지됨"
+                                addCustomSoundEvent(description)
+                                sendAlertNotification("🗣️ 음성 감지!", description)
+                            }
+                        }
                     }
                 }
+                // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+                // [수정] 로직 종료
+                // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
                 commandToSendToEsp32?.let { command ->
                     if (_mainUiState.value.isEspConnected) {
@@ -661,16 +689,22 @@ class CommunicationService : LifecycleService() {
     }
 
     private fun isAlarmKeyword(keyword: String): Boolean {
+        // [참고] "gas"는 위(listenForServerToEsp32Messages)에서 별도 처리하므로 여기엔 없음
         return keyword in listOf("siren", "horn", "boom")
     }
 
+    // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+    // [수정] updateNotificationCombined - startForeground()를 호출하도록 변경
+    // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
     private fun updateNotificationCombined() {
         lifecycleScope.launch {
             if (!settingsRepository.isBackgroundExecutionEnabledFlow.first()) {
+                // 백그라운드 실행이 비활성화되면, 포그라운드 서비스를 중지
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 return@launch
             }
 
+            // '백그라운드 실행'이 활성화된 경우
             val isPhoneMicMode = _isPhoneMicModeEnabled.value
             val isServerConnected = _serverTcpUiState.value.isConnected
             val isEspConnected = _mainUiState.value.isEspConnected
@@ -682,9 +716,24 @@ class CommunicationService : LifecycleService() {
                 !isPhoneMicMode && !isEspConnected -> "넥밴드 연결 대기 중..."
                 else -> "SmartNeckBand 실행 중"
             }
-            updateNotification(statusText)
+
+            // [핵심 변경]
+            // 알림을 생성하고, notificationManager.notify() 대신 startForeground()를 호출합니다.
+            // 이렇게 하면 서비스가 OS에 의해 종료되지 않습니다.
+            try {
+                startForeground(NOTIFICATION_ID, createNotification(statusText))
+                Log.d(TAG_SERVICE, "Service promoted to foreground.")
+            } catch (e: Exception) {
+                // (안드로이드 14+) FOREGROUND_SERVICE_MICROPHONE 권한 등이 없을 때 발생 가능
+                Log.e(TAG_SERVICE, "Failed to start foreground service", e)
+                showToast("포그라운드 서비스 시작 실패: ${e.message}")
+            }
         }
     }
+    // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+    // [수정] 로직 종료
+    // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+
 
     private fun createNotificationChannel() {
         val name = "SmartNeckBand 통신 서비스"
@@ -722,18 +771,14 @@ class CommunicationService : LifecycleService() {
             .build()
     }
 
-    private fun updateNotification(contentText: String) {
-        lifecycleScope.launch {
-            if (!settingsRepository.isBackgroundExecutionEnabledFlow.first()) {
-                Log.d(TAG_SERVICE, "Background execution disabled, skipping notification update.")
-                return@launch
-            }
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager.notify(NOTIFICATION_ID, createNotification(contentText))
-        }
-    }
+    // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+    // [수정] updateNotification() 함수는 updateNotificationCombined()로 통합되었으므로 삭제
+    // (기존 752-761행)
+    // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 
     private fun sendAlertNotification(title: String, contentText: String) {
+        // [참고] 이 알림은 '경고'용이므로 포그라운드 서비스 알림과 별개로 즉시 표시되어야 함
+        // (안드로이드 13 이상에서는 POST_NOTIFICATIONS 권한이 필요함)
         val notificationIntent = Intent(this, MainActivity::class.java)
         val pendingIntentFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
