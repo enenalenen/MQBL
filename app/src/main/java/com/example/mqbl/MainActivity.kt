@@ -176,17 +176,32 @@ fun MainAppNavigation() {
                     onBackgroundExecutionToggled = settingsViewModel::toggleBackgroundExecution,
                     onPhoneMicModeToggled = settingsViewModel::togglePhoneMicMode,
 
-                    // ▼▼▼ 추가/수정된 코드 (빠졌던 두 줄 추가) ▼▼T
+                    // ▼▼▼ 추가/수정된 코드 (빠졌던 두 줄 추가) ▼▼▼
                     onMicSensitivityChange = settingsViewModel::onMicSensitivityChange,
                     onMicSensitivityChangeFinished = settingsViewModel::onMicSensitivityChangeFinished,
                     // ▲▲▲ 추가/수정된 코드 ▲▲▲
+
+                    // --- ▼▼▼ 신규 추가 (진동 설정 콜백 8개) ▼▼▼ ---
+                    onVibrationWarningLeftChange = settingsViewModel::onVibrationWarningLeftChange,
+                    onVibrationWarningLeftChangeFinished = settingsViewModel::onVibrationWarningLeftChangeFinished,
+                    onVibrationWarningRightChange = settingsViewModel::onVibrationWarningRightChange,
+                    onVibrationWarningRightChangeFinished = settingsViewModel::onVibrationWarningRightChangeFinished,
+                    onVibrationVoiceLeftChange = settingsViewModel::onVibrationVoiceLeftChange,
+                    onVibrationVoiceLeftChangeFinished = settingsViewModel::onVibrationVoiceLeftChangeFinished,
+                    onVibrationVoiceRightChange = settingsViewModel::onVibrationVoiceRightChange,
+                    onVibrationVoiceRightChangeFinished = settingsViewModel::onVibrationVoiceRightChangeFinished,
+                    // --- ▲▲▲ 신규 추가 ▲▲▲ ---
 
                     customKeywords = customKeywords,
                     onCustomKeywordsChange = settingsViewModel::updateCustomKeywords,
                     onSaveCustomKeywords = settingsViewModel::saveCustomKeywords,
 
                     mainUiState = mainUiState,
-                    onSendVibrationValue = settingsViewModel::sendVibrationValue,
+
+                    // --- ▼▼▼ 수정된 코드 (onSendVibrationValue 삭제) ▼▼▼ ---
+                    // onSendVibrationValue = settingsViewModel::sendVibrationValue,
+                    // --- ▲▲▲ 수정된 코드 ▲▲▲ ---
+
                     onSendCommand = settingsViewModel::sendCommandToEsp32,
 
                     onStartRecording = settingsViewModel::startRecording,

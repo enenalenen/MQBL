@@ -38,6 +38,21 @@ class SettingsRepository private constructor(context: Context) {
     val isPhoneMicModeEnabledFlow: StateFlow<Boolean> = _isPhoneMicModeEnabled.asStateFlow()
     // ▲▲▲ 추가/수정된 코드 ▲▲▲
 
+    // ▼▼▼ 신규 추가 (진동 설정 Flow) ▼▼▼
+    private val _vibrationWarningLeft = MutableStateFlow(getVibrationWarningLeft())
+    val vibrationWarningLeftFlow: StateFlow<Int> = _vibrationWarningLeft.asStateFlow()
+
+    private val _vibrationWarningRight = MutableStateFlow(getVibrationWarningRight())
+    val vibrationWarningRightFlow: StateFlow<Int> = _vibrationWarningRight.asStateFlow()
+
+    private val _vibrationVoiceLeft = MutableStateFlow(getVibrationVoiceLeft())
+    val vibrationVoiceLeftFlow: StateFlow<Int> = _vibrationVoiceLeft.asStateFlow()
+
+    private val _vibrationVoiceRight = MutableStateFlow(getVibrationVoiceRight())
+    val vibrationVoiceRightFlow: StateFlow<Int> = _vibrationVoiceRight.asStateFlow()
+    // ▲▲▲ 신규 추가 ▲▲▲
+
+
     // ▼▼▼ 추가/수정된 코드 (폰 마이크 모드 Get/Set) ▼▼▼
     fun isPhoneMicModeEnabled(): Boolean {
         return prefs.getBoolean(KEY_PHONE_MIC_MODE, false) // 기본값 false
@@ -48,6 +63,40 @@ class SettingsRepository private constructor(context: Context) {
         _isPhoneMicModeEnabled.value = enabled
     }
     // ▲▲▲ 추가/수정된 코드 ▲▲▲
+
+    // ▼▼▼ 신규 추가 (진동 설정 Get/Set) ▼▼▼
+    fun getVibrationWarningLeft(): Int {
+        return prefs.getInt(KEY_VIB_WARN_LEFT, 220) // 기본값 220
+    }
+    fun setVibrationWarningLeft(value: Int) {
+        prefs.edit().putInt(KEY_VIB_WARN_LEFT, value).apply()
+        _vibrationWarningLeft.value = value
+    }
+
+    fun getVibrationWarningRight(): Int {
+        return prefs.getInt(KEY_VIB_WARN_RIGHT, 220) // 기본값 220
+    }
+    fun setVibrationWarningRight(value: Int) {
+        prefs.edit().putInt(KEY_VIB_WARN_RIGHT, value).apply()
+        _vibrationWarningRight.value = value
+    }
+
+    fun getVibrationVoiceLeft(): Int {
+        return prefs.getInt(KEY_VIB_VOICE_LEFT, 100) // 기본값 100
+    }
+    fun setVibrationVoiceLeft(value: Int) {
+        prefs.edit().putInt(KEY_VIB_VOICE_LEFT, value).apply()
+        _vibrationVoiceLeft.value = value
+    }
+
+    fun getVibrationVoiceRight(): Int {
+        return prefs.getInt(KEY_VIB_VOICE_RIGHT, 100) // 기본값 100
+    }
+    fun setVibrationVoiceRight(value: Int) {
+        prefs.edit().putInt(KEY_VIB_VOICE_RIGHT, value).apply()
+        _vibrationVoiceRight.value = value
+    }
+    // ▲▲▲ 신규 추가 ▲▲▲
 
     fun getEsp32Ip(): String {
         return prefs.getString(KEY_ESP32_IP, "192.168.43.101") ?: "192.168.43.101"
@@ -139,6 +188,13 @@ class SettingsRepository private constructor(context: Context) {
 
         // ▼▼▼ 추가/수정된 코드 (새 키) ▼▼▼
         private const val KEY_MIC_SENSITIVITY = "mic_sensitivity_vad"
+
+        // ▼▼▼ 신규 추가 (진동 설정 키) ▼▼▼
+        private const val KEY_VIB_WARN_LEFT = "vibration_warning_left"
+        private const val KEY_VIB_WARN_RIGHT = "vibration_warning_right"
+        private const val KEY_VIB_VOICE_LEFT = "vibration_voice_left"
+        private const val KEY_VIB_VOICE_RIGHT = "vibration_voice_right"
+        // ▲▲▲ 신규 추가 ▲▲▲
         // ▲▲▲ 추가/수정된 코드 ▲▲▲
     }
 }

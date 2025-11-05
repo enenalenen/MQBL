@@ -29,6 +29,17 @@ fun SettingsScreen(
     onMicSensitivityChangeFinished: () -> Unit, // 슬라이더 조작이 끝났을 때
     // ▲▲▲ 추가/수정된 코드 ▲▲▲
 
+    // --- ▼▼▼ 신규 추가 (진동 설정 콜백) ▼▼▼ ---
+    onVibrationWarningLeftChange: (Float) -> Unit,
+    onVibrationWarningLeftChangeFinished: () -> Unit,
+    onVibrationWarningRightChange: (Float) -> Unit,
+    onVibrationWarningRightChangeFinished: () -> Unit,
+    onVibrationVoiceLeftChange: (Float) -> Unit,
+    onVibrationVoiceLeftChangeFinished: () -> Unit,
+    onVibrationVoiceRightChange: (Float) -> Unit,
+    onVibrationVoiceRightChangeFinished: () -> Unit,
+    // --- ▲▲▲ 신규 추가 ▲▲▲ ---
+
     // Custom Keywords
     customKeywords: String,
     onCustomKeywordsChange: (String) -> Unit,
@@ -42,8 +53,8 @@ fun SettingsScreen(
     onEsp32ServerPortChange: (String) -> Unit,
     onEsp32Connect: () -> Unit,
     onEsp32Disconnect: () -> Unit,
-    onSendVibrationValue: (Int) -> Unit,
-    onSendCommand: (String) -> Unit,
+    // onSendVibrationValue: (Int) -> Unit, // (삭제됨)
+    onSendCommand: (String) -> Unit, // (유지됨 - 테스트 버튼용)
 
     // Audio Recording
     onStartRecording: () -> Unit,
@@ -59,7 +70,7 @@ fun SettingsScreen(
     onServerConnect: () -> Unit,
     onServerDisconnect: () -> Unit,
 ) {
-    var currentVibrationValue by remember { mutableIntStateOf(5) }
+    // var currentVibrationValue by remember { mutableIntStateOf(5) } // (삭제됨)
 
     LazyColumn(
         modifier = Modifier
@@ -117,23 +128,24 @@ fun SettingsScreen(
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+
+                    // --- ▼▼▼ 수정된 코드 (테스트 버튼 변경) ▼▼▼ ---
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                        Text("진동 강도 조절 (0 ~ 10)", style = MaterialTheme.typography.bodyLarge)
+                        Text("진동 패턴 테스트", style = MaterialTheme.typography.titleMedium)
                         Spacer(modifier = Modifier.height(10.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceEvenly
                         ) {
-                            Button(onClick = { if (currentVibrationValue > 0) { currentVibrationValue--; onSendVibrationValue(currentVibrationValue) } }, enabled = currentVibrationValue > 0 && mainUiState.isEspConnected) { Text(text = "-") }
-                            Text(text = currentVibrationValue.toString(), style = MaterialTheme.typography.headlineMedium)
-                            Button(onClick = { if (currentVibrationValue < 10) { currentVibrationValue++; onSendVibrationValue(currentVibrationValue) } }, enabled = currentVibrationValue < 10 && mainUiState.isEspConnected) { Text(text = "+") }
-                        }
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Button(onClick = { onSendCommand("VIBRATE_TRIGGER") }, enabled = mainUiState.isEspConnected) {
-                            Text("진동 테스트 (수동 신호)")
+                            Button(onClick = { onSendCommand("VIB_PATTERN:WARNING") }, enabled = mainUiState.isEspConnected) {
+                                Text("경고 진동 테스트")
+                            }
+                            Button(onClick = { onSendCommand("VIB_PATTERN:VOICE") }, enabled = mainUiState.isEspConnected) {
+                                Text("음성 진동 테스트")
+                            }
                         }
                     }
+                    // --- ▲▲▲ 수정된 코드 ▲▲▲ ---
 
                     HorizontalDivider()
 
@@ -202,6 +214,65 @@ fun SettingsScreen(
             }
         }
         // --- ▲▲▲ 추가/수정된 코드 ▲▲▲ ---
+
+        // --- ▼▼▼ 신규 추가 (사용자 지정 진동 설정) ▼▼▼ ---
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("사용자 지정 진동 설정", style = MaterialTheme.typography.titleMedium)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "경고 및 음성 알림 시 울릴 모터의 세기를 0(Off) ~ 255(Max)로 설정합니다.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // 1. 경고 - 왼쪽
+                    VibrationSlider(
+                        label = "경고 - 왼쪽 모터",
+                        value = settingsUiState.vibrationWarningLeft,
+                        onValueChange = onVibrationWarningLeftChange,
+                        onValueChangeFinished = onVibrationWarningLeftChangeFinished,
+                        enabled = mainUiState.isEspConnected // 넥밴드 연결 시에만 활성화
+                    )
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+                    // 2. 경고 - 오른쪽
+                    VibrationSlider(
+                        label = "경고 - 오른쪽 모터",
+                        value = settingsUiState.vibrationWarningRight,
+                        onValueChange = onVibrationWarningRightChange,
+                        onValueChangeFinished = onVibrationWarningRightChangeFinished,
+                        enabled = mainUiState.isEspConnected
+                    )
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+                    // 3. 음성 - 왼쪽
+                    VibrationSlider(
+                        label = "음성 - 왼쪽 모터",
+                        value = settingsUiState.vibrationVoiceLeft,
+                        onValueChange = onVibrationVoiceLeftChange,
+                        onValueChangeFinished = onVibrationVoiceLeftChangeFinished,
+                        enabled = mainUiState.isEspConnected
+                    )
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+                    // 4. 음성 - 오른쪽
+                    VibrationSlider(
+                        label = "음성 - 오른쪽 모터",
+                        value = settingsUiState.vibrationVoiceRight,
+                        onValueChange = onVibrationVoiceRightChange,
+                        onValueChangeFinished = onVibrationVoiceRightChangeFinished,
+                        enabled = mainUiState.isEspConnected
+                    )
+                }
+            }
+        }
+        // --- ▲▲▲ 신규 추가 ▲▲▲ ---
 
 
         // --- 감지 단어 설정 섹션 ---
@@ -336,6 +407,44 @@ fun SettingsScreen(
     }
 }
 
+// --- ▼▼▼ 신규 추가 (진동 슬라이더 UI) ▼▼▼ ---
+@Composable
+private fun VibrationSlider(
+    label: String,
+    value: Int,
+    onValueChange: (Float) -> Unit,
+    onValueChangeFinished: () -> Unit,
+    enabled: Boolean = true
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(label, style = MaterialTheme.typography.bodyLarge)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Off (0)", style = MaterialTheme.typography.labelMedium)
+            Spacer(Modifier.width(12.dp))
+            Slider(
+                value = value.toFloat(),
+                onValueChange = onValueChange,
+                onValueChangeFinished = onValueChangeFinished,
+                valueRange = 0f..255f,
+                steps = 254, // 0~255 (256개 값) -> 255개 구간 -> 254 스텝
+                modifier = Modifier.weight(1f),
+                enabled = enabled
+            )
+            Spacer(Modifier.width(12.dp))
+            Text("Max (255)", style = MaterialTheme.typography.labelMedium)
+        }
+        Text(
+            text = "현재 값: $value",
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.align(Alignment.CenterHorizontally)
+        )
+    }
+}
+// --- ▲▲▲ 신규 추가 ▲Click here to preview the changes▲▲ ---
+
 
 @Preview(showBackground = true)
 @Composable
@@ -346,7 +455,13 @@ fun SettingsScreenPreview() {
                 isBackgroundExecutionEnabled = true,
                 isRecording = false,
                 isPhoneMicModeEnabled = true,
-                micSensitivity = 7 // ▼▼▼ 추가 ▼▼▼
+                micSensitivity = 7,
+                // ▼▼▼ 신규 추가 (미리보기 값) ▼▼▼
+                vibrationWarningLeft = 255,
+                vibrationWarningRight = 255,
+                vibrationVoiceLeft = 0,
+                vibrationVoiceRight = 180
+                // ▲▲▲ 신규 추가 ▲▲▲
             ),
             onBackgroundExecutionToggled = {},
             onPhoneMicModeToggled = {},
@@ -356,8 +471,19 @@ fun SettingsScreenPreview() {
             onMicSensitivityChangeFinished = {},
             // ▲▲▲ 추가/수정된 코드 ▲▲▲
 
+            // ▼▼▼ 신규 추가 (미리보기 콜백) ▼▼▼
+            onVibrationWarningLeftChange = {},
+            onVibrationWarningLeftChangeFinished = {},
+            onVibrationWarningRightChange = {},
+            onVibrationWarningRightChangeFinished = {},
+            onVibrationVoiceLeftChange = {},
+            onVibrationVoiceLeftChangeFinished = {},
+            onVibrationVoiceRightChange = {},
+            onVibrationVoiceRightChangeFinished = {},
+            // ▲▲▲ 신규 추가 ▲▲▲
+
             mainUiState = MainUiState(status = "스마트 넥밴드: 연결됨", espDeviceName = "스마트 넥밴드 (Preview)", isEspConnected = true),
-            onSendVibrationValue = {},
+            // onSendVibrationValue = {}, // (삭제됨)
             onSendCommand = {},
             onStartRecording = {},
             onStopRecording = {},

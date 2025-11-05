@@ -1,14 +1,19 @@
 package com.example.mqbl.ui.settings
 
-/**
- * 설정 화면 전체의 UI 상태를 나타내는 데이터 클래스.
- */
-data class SettingsUiState(
-    val isBackgroundExecutionEnabled: Boolean = true,
-    val isRecording: Boolean = false,
-    val isPhoneMicModeEnabled: Boolean = false,
+// (파일 이름은 SettingsState.kt 이지만, ViewModel에서 SettingsUiState를 사용하므로
+// data class 이름은 SettingsUiState라고 가정합니다.)
 
-    // ▼▼▼ 추가/수정된 코드 (마이크 민감도 UI 상태) ▼▼▼
-    val micSensitivity: Int = 5 // 1(둔감) ~ 10(민감), 기본값 5
-    // ▲▲▲ 추가/수정된 코드 ▲▲▲
+data class SettingsUiState(
+    // --- 기존 프로퍼티 ---
+    val isBackgroundExecutionEnabled: Boolean = true,
+    val isPhoneMicModeEnabled: Boolean = false,
+    val isRecording: Boolean = false,
+    val micSensitivity: Int = 5, // VAD 민감도 (1~10)
+
+    // --- ▼▼▼ 신규 추가 (진동 설정) ▼▼▼ ---
+    val vibrationWarningLeft: Int = 200,  // 경고 (좌) (0~255)
+    val vibrationWarningRight: Int = 200, // 경고 (우) (0~255)
+    val vibrationVoiceLeft: Int = 100,      // 음성 (좌) (0~255)
+    val vibrationVoiceRight: Int = 100    // 음성 (우) (0~255)
+    // --- ▲▲▲ 신규 추가 ▲▲▲ ---
 )

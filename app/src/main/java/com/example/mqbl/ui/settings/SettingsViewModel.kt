@@ -76,6 +76,24 @@ class SettingsViewModel(application : Application) : AndroidViewModel(applicatio
             .launchIn(viewModelScope)
         // ▲▲▲ 추가/수정된 코드 ▲▲▲
 
+        // ▼▼▼ 신규 추가 (진동 설정 값 구독) ▼▼▼
+        settingsRepository.vibrationWarningLeftFlow
+            .onEach { value -> _uiState.update { it.copy(vibrationWarningLeft = value) } }
+            .launchIn(viewModelScope)
+
+        settingsRepository.vibrationWarningRightFlow
+            .onEach { value -> _uiState.update { it.copy(vibrationWarningRight = value) } }
+            .launchIn(viewModelScope)
+
+        settingsRepository.vibrationVoiceLeftFlow
+            .onEach { value -> _uiState.update { it.copy(vibrationVoiceLeft = value) } }
+            .launchIn(viewModelScope)
+
+        settingsRepository.vibrationVoiceRightFlow
+            .onEach { value -> _uiState.update { it.copy(vibrationVoiceRight = value) } }
+            .launchIn(viewModelScope)
+        // ▲▲▲ 신규 추가 ▲▲▲
+
         settingsRepository.customKeywordsFlow
             .onEach { keywords -> _customKeywords.value = keywords }
             .launchIn(viewModelScope)
@@ -173,6 +191,58 @@ class SettingsViewModel(application : Application) : AndroidViewModel(applicatio
     }
     // --- ▲▲▲ 추가/수정된 코드 ▲▲▲ ---
 
+    // --- ▼▼▼ 신규 추가 (진동 설정 콜백 함수 / Float 수용하도록 수정) ▼▼▼ ---
+
+    // 1. 경고 - 왼쪽
+    fun onVibrationWarningLeftChange(newValue: Float) {
+        _uiState.update { it.copy(vibrationWarningLeft = newValue.roundToInt()) }
+    }
+    fun onVibrationWarningLeftChangeFinished() {
+        viewModelScope.launch {
+            val finalValue = _uiState.value.vibrationWarningLeft
+            settingsRepository.setVibrationWarningLeft(finalValue)
+            showToast("경고(좌) 진동 세기가 $finalValue (으)로 저장되었습니다.")
+            // (참고: CommunicationService가 자동으로 ESP32에 전송합니다)
+        }
+    }
+
+    // 2. 경고 - 오른쪽
+    fun onVibrationWarningRightChange(newValue: Float) {
+        _uiState.update { it.copy(vibrationWarningRight = newValue.roundToInt()) }
+    }
+    fun onVibrationWarningRightChangeFinished() {
+        viewModelScope.launch {
+            val finalValue = _uiState.value.vibrationWarningRight
+            settingsRepository.setVibrationWarningRight(finalValue)
+            showToast("경고(우) 진동 세기가 $finalValue (으)로 저장되었습니다.")
+        }
+    }
+
+    // 3. 음성 - 왼쪽
+    fun onVibrationVoiceLeftChange(newValue: Float) {
+        _uiState.update { it.copy(vibrationVoiceLeft = newValue.roundToInt()) }
+    }
+    fun onVibrationVoiceLeftChangeFinished() {
+        viewModelScope.launch {
+            val finalValue = _uiState.value.vibrationVoiceLeft
+            settingsRepository.setVibrationVoiceLeft(finalValue)
+            showToast("음성(좌) 진동 세기가 $finalValue (으)로 저장되었습니다.")
+        }
+    }
+
+    // 4. 음성 - 오른쪽
+    fun onVibrationVoiceRightChange(newValue: Float) {
+        _uiState.update { it.copy(vibrationVoiceRight = newValue.roundToInt()) }
+    }
+    fun onVibrationVoiceRightChangeFinished() {
+        viewModelScope.launch {
+            val finalValue = _uiState.value.vibrationVoiceRight
+            settingsRepository.setVibrationVoiceRight(finalValue)
+            showToast("음성(우) 진동 세기가 $finalValue (으)로 저장되었습니다.")
+        }
+    }
+    // --- ▲▲▲ 신규 추가 ▲▲▲ ---
+
 
     // --- Service Actions ---
     fun connectToEsp32() {
@@ -190,7 +260,11 @@ class SettingsViewModel(application : Application) : AndroidViewModel(applicatio
     }
 
     fun disconnectFromServer() { _binder.value?.getService()?.requestServerTcpDisconnect() }
-    fun sendVibrationValue(value: Int) { _binder.value?.getService()?.sendVibrationValueToEsp32(value) }
+
+    // ▼▼▼ 수정된 코드 (sendVibrationValue 함수는 이제 사용되지 않음) ▼▼▼
+    // fun sendVibrationValue(value: Int) { _binder.value?.getService()?.sendVibrationValueToEsp32(value) }
+    // ▲▲▲ 수정된 코드 ▲▲▲
+
     fun sendCommandToEsp32(command: String) { _binder.value?.getService()?.sendCommandToEsp32(command) }
 
     fun togglePhoneMicMode(enabled: Boolean) {

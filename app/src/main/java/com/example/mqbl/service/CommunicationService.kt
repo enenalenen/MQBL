@@ -135,6 +135,14 @@ class CommunicationService : LifecycleService() {
     private val _serverTcpUiState = MutableStateFlow(TcpUiState(connectionStatus = "서버: 연결 끊김"))
     private val _receivedServerTcpMessages = MutableStateFlow<List<TcpMessageItem>>(emptyList())
 
+    // ▼▼▼ 신규 추가 (진동 설정값) ▼▼▼
+    // (SettingsRepository에서 값을 가져오기 전까지 사용할 기본값)
+    private var vibWarnLeft: Int = 220
+    private var vibWarnRight: Int = 220
+    private var vibVoiceLeft: Int = 0
+    private var vibVoiceRight: Int = 180
+    // ▲▲▲ 신규 추가 ▲▲▲
+
     private val timeFormatter = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
     override fun onCreate() {
@@ -164,6 +172,51 @@ class CommunicationService : LifecycleService() {
                 }
             }
         }
+
+        // ▼▼▼ 신규 추가 (진동 설정값 불러오기) ▼▼▼
+        // (SettingsRepository에 해당 Flow들이 추가될 예정)
+        lifecycleScope.launch {
+            try {
+                settingsRepository.vibrationWarningLeftFlow.collect { value ->
+                    vibWarnLeft = value
+                    // ESP32가 연결되어 있다면 즉시 새 설정 전송
+                    if (_mainUiState.value.isEspConnected) {
+                        sendToEsp32("CONF_WARN:$vibWarnLeft,$vibWarnRight")
+                    }
+                }
+            } catch (e: Exception) { Log.w(TAG_SERVICE, "vibrationWarningLeftFlow not found, using default.") }
+        }
+        lifecycleScope.launch {
+            try {
+                settingsRepository.vibrationWarningRightFlow.collect { value ->
+                    vibWarnRight = value
+                    if (_mainUiState.value.isEspConnected) {
+                        sendToEsp32("CONF_WARN:$vibWarnLeft,$vibWarnRight")
+                    }
+                }
+            } catch (e: Exception) { Log.w(TAG_SERVICE, "vibrationWarningRightFlow not found, using default.") }
+        }
+        lifecycleScope.launch {
+            try {
+                settingsRepository.vibrationVoiceLeftFlow.collect { value ->
+                    vibVoiceLeft = value
+                    if (_mainUiState.value.isEspConnected) {
+                        sendToEsp32("CONF_VOICE:$vibVoiceLeft,$vibVoiceRight")
+                    }
+                }
+            } catch (e: Exception) { Log.w(TAG_SERVICE, "vibrationVoiceLeftFlow not found, using default.") }
+        }
+        lifecycleScope.launch {
+            try {
+                settingsRepository.vibrationVoiceRightFlow.collect { value ->
+                    vibVoiceRight = value
+                    if (_mainUiState.value.isEspConnected) {
+                        sendToEsp32("CONF_VOICE:$vibVoiceLeft,$vibVoiceRight")
+                    }
+                }
+            } catch (e: Exception) { Log.w(TAG_SERVICE, "vibrationVoiceRightFlow not found, using default.") }
+        }
+        // ▲▲▲ 신규 추가 ▲▲▲
 
         createNotificationChannel()
         listenForServerToEsp32Messages()
@@ -220,7 +273,9 @@ class CommunicationService : LifecycleService() {
     }
 
     fun sendVibrationValueToEsp32(value: Int) {
-        sendToEsp32(value.toString())
+        // 이 함수는 이제 사용되지 않음 (CONF_... 로 대체됨)
+        // sendToEsp32(value.toString())
+        Log.w(TAG_ESP32_TCP, "sendVibrationValueToEsp32 is deprecated.")
     }
 
     fun sendCommandToEsp32(command: String) {
@@ -344,11 +399,18 @@ class CommunicationService : LifecycleService() {
                 _mainUiState.update { it.copy(status = "스마트 넥밴드: 연결됨", isConnecting = false, isEspConnected = true, espDeviceName = "스마트 넥밴드") }
                 updateNotificationCombined()
 
+                // ▼▼▼ 수정된 코드 (연결 시 설정 전송) ▼▼▼
+                // ESP32에 현재 앱의 진동 설정을 전송
+                sendToEsp32("CONF_WARN:$vibWarnLeft,$vibWarnRight")
+                sendToEsp32("CONF_VOICE:$vibVoiceLeft,$vibVoiceRight")
+
+                // 오디오 상태 전송
                 if (_isPhoneMicModeEnabled.value) {
                     sendToEsp32("PAUSE_AUDIO")
                 } else {
                     sendToEsp32("RESUME_AUDIO")
                 }
+                // ▲▲▲ 수정된 코드 ▲▲▲
 
                 val inputStream = socket.getInputStream()
                 val outputStream = socket.getOutputStream()
@@ -624,8 +686,8 @@ class CommunicationService : LifecycleService() {
             CommunicationHub.serverToEsp32Flow.collect { message ->
 
                 // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-                // [수정] '경고 종료' 메시지를 우선적으로 처리하는 로직 추가
-                // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+                // [수정] VIBRATE_BOTH/RIGHT -> VIB_PATTERN:WARNING/VOICE 로 변경
+                // ▼▼▼▼▼▼▼▼▼▼▼▼▼M(B)▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
                 val trimmedMessage = message.trim()
                 Log.i(TAG_SERVICE, "Service received message from Hub: $trimmedMessage")
 
@@ -654,7 +716,8 @@ class CommunicationService : LifecycleService() {
                         }
 
                         if (alarmKeywordsDetected.isNotEmpty()) {
-                            commandToSendToEsp32 = "VIBRATE_BOTH"
+                            // ★★★★★ 수정된 지점 ★★★★★
+                            commandToSendToEsp32 = "VIB_PATTERN:WARNING"
                             val description = "'${alarmKeywordsDetected.joinToString()}' 경고 감지됨"
                             addDetectionEvent(description)
                             sendAlertNotification("🚨 위험 감지!", description)
@@ -664,7 +727,8 @@ class CommunicationService : LifecycleService() {
                                 customKeywords.any { custom -> received.equals(custom, ignoreCase = true) }
                             }
                             if (customKeywordsDetected.isNotEmpty()) {
-                                commandToSendToEsp32 = "VIBRATE_RIGHT"
+                                // ★★★★★ 수정된 지점 ★★★★★
+                                commandToSendToEsp32 = "VIB_PATTERN:VOICE"
                                 val description = "'${customKeywordsDetected.joinToString()}' 단어 감지됨"
                                 addCustomSoundEvent(description)
                                 sendAlertNotification("🗣️ 음성 감지!", description)
